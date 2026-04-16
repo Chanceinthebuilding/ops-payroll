@@ -6,62 +6,166 @@
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <title>HR 급여 검증 – 엑셀 업로드</title>
   <style>
+    @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
     * { box-sizing: border-box; }
-    body { font-family: 'Malgun Gothic', sans-serif; max-width: 640px; margin: 48px auto; padding: 0 16px; }
-    h1 { font-size: 1.5rem; margin-bottom: 8px; }
-    .sub { color: #666; margin-bottom: 24px; }
-    .zone {
-      border: 2px dashed #ccc;
-      border-radius: 12px;
-      padding: 48px 24px;
-      text-align: center;
-      background: #fafafa;
-      cursor: pointer;
-      transition: background .2s, border-color .2s;
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px 16px 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 400;
+      color: #111827;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(99, 102, 241, 0.12), transparent 42%),
+        radial-gradient(circle at 86% 0%, rgba(16, 185, 129, 0.10), transparent 40%),
+        linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
     }
-    .zone:hover, .zone.dragover { background: #f0f0f0; border-color: #888; }
+    .page {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .hero-card {
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 26px;
+      padding: 30px 24px 26px;
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    }
+    h1 {
+      margin: 4px 0 10px;
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #0f172a;
+    }
+    .sub {
+      margin: 0 0 22px;
+      line-height: 1.6;
+      color: #475569;
+      font-size: 0.96rem;
+    }
+    .section-title {
+      margin: 18px 0 9px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .zone {
+      display: block;
+      border: 1.6px dashed #cbd5e1;
+      border-radius: 20px;
+      padding: 34px 20px;
+      text-align: center;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      cursor: pointer;
+      transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    }
+    .zone:hover,
+    .zone.dragover {
+      border-color: #94a3b8;
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
     .zone input { display: none; }
-    .zone p { margin: 0; color: #555; }
-    .zone .hint { margin-top: 8px; font-size: 0.9rem; color: #999; }
-    .btn { margin-top: 16px; padding: 12px 24px; background: #333; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; }
-    .btn:hover { background: #555; }
-    .btn:disabled { background: #ccc; cursor: not-allowed; }
-    .flash { padding: 12px; border-radius: 8px; margin-bottom: 16px; }
-    .flash.error { background: #fee; color: #c00; }
-    .flash.success { background: #efe; color: #060; }
+    .zone p {
+      margin: 0;
+      color: #334155;
+      font-size: 0.95rem;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+    }
+    .zone .hint {
+      margin-top: 8px;
+      font-size: 0.83rem;
+      color: #64748b;
+      font-weight: 400;
+    }
+    .footer {
+      margin-top: 18px;
+      text-align: center;
+    }
+    .hint-inline {
+      margin: 0 0 12px;
+      font-size: 0.86rem;
+      color: #64748b;
+    }
+    .btn {
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 24px;
+      min-width: 130px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #fff;
+      background: linear-gradient(135deg, #111827 0%, #334155 100%);
+      cursor: pointer;
+      transition: transform .16s ease, box-shadow .16s ease, opacity .2s ease;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.26);
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .flash {
+      margin: 0 0 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      border: 1px solid transparent;
+    }
+    .flash.error {
+      color: #991b1b;
+      border-color: #fecaca;
+      background: #fef2f2;
+    }
+    .flash.success {
+      color: #065f46;
+      border-color: #a7f3d0;
+      background: #ecfdf5;
+    }
   </style>
 </head>
 <body>
-  {% include '_nav.html' %}
-  <h1>급여 데이터 관리</h1>
-  <p class="sub">관리자 전용입니다. 출퇴근 엑셀(필수)과 휴가 엑셀(선택)을 올리면 <strong>모든 사용자에게 공개되는</strong> 급여·일별 근무 결과가 갱신됩니다.</p>
+  <div class="page">
+    {% include '_nav.html' %}
+    <section class="hero-card">
+      <h1>급여 데이터 관리</h1>
+      <p class="sub">관리자 전용입니다. 출퇴근 엑셀(필수)과 휴가 엑셀(선택)을 올리면 <strong>모든 사용자에게 공개되는</strong> 급여·일별 근무 결과가 갱신됩니다.</p>
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, msg in messages %}
-        <div class="flash {{ category }}">{{ msg }}</div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, msg in messages %}
+            <div class="flash {{ category }}">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
 
-  <form action="{{ url_for('admin') }}" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
-    <p class="sub" style="margin-bottom: 8px;"><strong>1. 출퇴근 엑셀</strong> (필수)</p>
-    <label class="zone" id="dropzone" for="file">
-      <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
-      <p id="label">출퇴근 엑셀을 여기에 끌어다 놓거나 클릭해서 선택하세요</p>
-      <p class="hint">.xlsx, .xls (시프티 출퇴근 형식)</p>
-    </label>
-    <p class="sub" style="margin: 24px 0 8px;"><strong>2. 휴가 엑셀</strong> (선택 – 유급/무급 휴가 반영 시)</p>
-    <label class="zone" id="dropzone2" for="file_leave">
-      <input type="file" name="file_leave" id="file_leave" accept=".xlsx,.xls">
-      <p id="label2">휴가 엑셀을 여기에 넣으세요 (없으면 비워 두세요)</p>
-      <p class="hint">사원번호, 날짜, 휴가유형(유급/무급), 분(또는 시간·일수)</p>
-    </label>
-    <div style="text-align: center;">
-      <p id="submitMsg" class="hint" hidden>처리 중… (엑셀 크기에 따라 10~30초 걸릴 수 있습니다)</p>
-      <button type="submit" class="btn" id="submitBtn" disabled>결과 보기</button>
-    </div>
-  </form>
+      <form action="{{ url_for('admin') }}" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
+        <p class="section-title">1. 출퇴근 엑셀 (필수)</p>
+        <label class="zone" id="dropzone" for="file">
+          <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
+          <p id="label">출퇴근 엑셀을 여기에 끌어다 놓거나 클릭해서 선택하세요</p>
+          <p class="hint">.xlsx, .xls (시프티 출퇴근 형식)</p>
+        </label>
+
+        <p class="section-title" style="margin-top: 20px;">2. 휴가 엑셀 (선택)</p>
+        <label class="zone" id="dropzone2" for="file_leave">
+          <input type="file" name="file_leave" id="file_leave" accept=".xlsx,.xls">
+          <p id="label2">휴가 엑셀을 여기에 넣으세요 (없으면 비워 두세요)</p>
+          <p class="hint">사원번호, 날짜, 휴가유형(유급/무급), 분(또는 시간·일수)</p>
+        </label>
+
+        <div class="footer">
+          <p id="submitMsg" class="hint-inline" hidden>처리 중… (엑셀 크기에 따라 10~30초 걸릴 수 있습니다)</p>
+          <button type="submit" class="btn" id="submitBtn" disabled>결과 보기</button>
+        </div>
+      </form>
+    </section>
+  </div>
 
   <script>
     var fileInput = document.getElementById('file');
