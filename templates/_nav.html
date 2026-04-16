@@ -3,6 +3,9 @@
   {% if auth_enabled %}
   <nav style="display:flex; flex-wrap:wrap; gap:12px 16px; align-items:center; font-size:0.9rem;">
     <span style="color:#555;">{{ current_user_email }}</span>
+    {% if is_admin_user %}
+    <a href="{{ url_for('admin') }}" style="color:#06c;text-decoration:none;">급여 데이터 관리</a>
+    {% endif %}
     <a href="{{ url_for('dashboard') }}" style="color:#06c;text-decoration:none;">인건비 대시보드</a>
     <a href="{{ url_for('logout') }}" style="color:#666;text-decoration:none;">로그아웃</a>
   </nav>

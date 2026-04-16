@@ -23,6 +23,7 @@ Railway 서비스의 `Variables`에서 아래 값 입력:
 - `SESSION_COOKIE_SECURE` = `1`
 - `GOOGLE_OAUTH_CLIENT_ID` = Google OAuth Client ID
 - `GOOGLE_OAUTH_CLIENT_SECRET` = Google OAuth Client Secret
+- `ADMIN_EMAILS` = (필수) 콤마로 구분한 관리자 Gmail/Workspace 이메일 (예: `you@company.com`) — `/admin` 업로드·구글 시트 내보내기
 - `ALLOWED_EMAIL_DOMAIN` = (선택) `yourcompany.com`
 - `GOOGLE_OAUTH_HOSTED_DOMAIN` = (선택) `yourcompany.com`
 

@@ -131,9 +131,14 @@
 </head>
 <body>
   {% include '_nav.html' %}
-  <div class="back"><a href="/">← 다시 업로드</a></div>
+  {% set _ro = result_read_only | default(false) %}
+  {% set _editable = table_editable | default(true) %}
+  {% set _back_href = result_back_href | default('/', true) %}
+  {% set _back_label = result_back_label | default('← 홈', true) %}
+  <div class="back"><a href="{{ _back_href }}">{{ _back_label }}</a></div>
   <h1>급여·근무 결과</h1>
-  <p>업로드한 엑셀 기준으로 계산된 결과입니다.</p>
+  <p>{% if _ro %}관리자가 등록한 공개 급여 데이터입니다.{% else %}업로드한 엑셀 기준으로 계산된 결과입니다.{% endif %}</p>
+  {% if export_allowed | default(false) %}
   <p style="margin-bottom: 16px;">
     <button type="button" class="btn btn-export" id="btnExportGoogle">구글 시트 내보내기</button>
   </p>
@@ -149,6 +154,7 @@
       <p class="msg" id="exportMsg"></p>
     </div>
   </div>
+  {% endif %}
 
   <section>
     <h2>급여 결과 (payroll_result)</h2>
@@ -170,6 +176,7 @@
         <option value="">전체 직원</option>
       </select>
     </p>
+    {% if _editable %}
     <p class="autofill-legend" style="margin: 12px 0;">
       <strong>빈칸 자동채우기:</strong>
       <label style="margin-left: 8px;"><input type="checkbox" id="autofillUseContract" checked> 계약 근무시간 적용</label>
@@ -182,6 +189,7 @@
       <button type="button" class="btn btn-autofill" id="btnAutofill" style="margin-left: 8px; background: #28a745; color: #fff;">적용</button>
       <span class="autofill-hint" style="margin-left: 8px; color: #666; font-size: 0.9rem;">계약 적용 시 6·7·8시간 등 직원별 소정근로시간으로 채웁니다. 적용 시 기본급~합계가 자동 재계산됩니다.</span>
     </p>
+    {% endif %}
     <div class="table-wrap table-wrap-payroll">
       <div class="table-wrap-x">
       {% if use_payroll_table %}
@@ -203,12 +211,14 @@
             <td data-col="employee_id">{{ row.employee_id }}</td>
             <td data-col="employee_name">{{ row.employee_name }}</td>
             <td class="contract-select-cell">
-              {% if row.get('_no_id_contract') and contract_options %}
+              {% if row.get('_no_id_contract') and contract_options and _editable %}
               <select class="contract-select" data-default-hours="{{ row.get('_scheduled_hours', 8) }}" title="계약 선택 시 해당 소정근로시간으로 재계산됩니다">
                 {% for opt in contract_options %}
                 <option value="{{ opt.id }}" data-scheduled-hours="{{ opt.scheduled_hours }}"{% if (row.get('_scheduled_hours')|string) == (opt.scheduled_hours|string) %} selected{% endif %}>{{ opt.label }}</option>
                 {% endfor %}
               </select>
+              {% elif row.get('_no_id_contract') and contract_options %}
+              <span class="text-muted" title="읽기 전용">—</span>
               {% else %}
               <span class="text-muted">—</span>
               {% endif %}
@@ -217,7 +227,7 @@
               {% if typ == 'weekly' %}
               {% set wval = row[col] %}
               {% set w_over_8 = col in row.get('_over_8_cols', []) %}
-              <td class="col-weekly{{ ' cell-over-8' if w_over_8 else '' }}" data-col="{{ col }}" data-is-weekly="true" data-type="number" contenteditable="true">{{ wval }}</td>
+              <td class="col-weekly{{ ' cell-over-8' if w_over_8 else '' }}" data-col="{{ col }}" data-is-weekly="true" data-type="number" contenteditable="{{ 'true' if _editable else 'false' }}">{{ wval }}</td>
               {% else %}
               {% set val = row[col] %}
               {% set is_empty = (val is none or val == '') %}
@@ -227,14 +237,14 @@
               {% set is_over_8 = col in row.get('_over_8_cols', []) %}
               {# 주휴용 = 산정기간 이전 일자: 주휴 산정 참고용만. 기본급·야근 합산에서 반드시 제외 #}
               {% if '주휴용' in (col|string) %}
-              <td class="{{ cell_class }}{{ ' text-non-half' if is_non_half else '' }}{{ ' cell-over-8' if is_over_8 else '' }}" data-col="{{ col }}" data-type="number" data-is-prior-weekly="true" contenteditable="true">{{ val if not is_empty else '' }}</td>
+              <td class="{{ cell_class }}{{ ' text-non-half' if is_non_half else '' }}{{ ' cell-over-8' if is_over_8 else '' }}" data-col="{{ col }}" data-type="number" data-is-prior-weekly="true" contenteditable="{{ 'true' if _editable else 'false' }}">{{ val if not is_empty else '' }}</td>
               {% else %}
-              <td class="{{ cell_class }}{{ ' text-non-half' if is_non_half else '' }}{{ ' cell-over-8' if is_over_8 else '' }}" data-col="{{ col }}" data-type="number" data-is-date="true" contenteditable="true">{{ val if not is_empty else '' }}</td>
+              <td class="{{ cell_class }}{{ ' text-non-half' if is_non_half else '' }}{{ ' cell-over-8' if is_over_8 else '' }}" data-col="{{ col }}" data-type="number" data-is-date="true" contenteditable="{{ 'true' if _editable else 'false' }}">{{ val if not is_empty else '' }}</td>
               {% endif %}
               {% endif %}
             {% endfor %}
             {% for c in pay_cols %}
-            <td data-col="{{ c }}" data-type="number" contenteditable="true">{{ row[c] }}</td>
+            <td data-col="{{ c }}" data-type="number" contenteditable="{{ 'true' if _editable else 'false' }}">{{ row[c] }}</td>
             {% endfor %}
           </tr>
           {% endfor %}
@@ -269,7 +279,7 @@
     {% endif %}
   </section>
 
-  <div class="back"><a href="/">← 다시 업로드</a></div>
+  <div class="back"><a href="{{ _back_href }}">{{ _back_label }}</a></div>
 
   <script>
     (function() {
@@ -677,6 +687,7 @@
       var btnCancel = document.getElementById('btnModalCancel');
       var msg = document.getElementById('exportMsg');
 
+      if (btn && modal && btnOk && btnCancel && msg) {
       function closeModal() { modal.classList.remove('open'); msg.textContent = ''; }
       function showMsg(text, isError) {
         msg.textContent = text;
@@ -737,6 +748,7 @@
             showMsg('요청 실패: ' + (err.message || err), true);
           });
       });
+      }
     })();
   </script>
 </body>

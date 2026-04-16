@@ -46,6 +46,7 @@ def register_google_auth(app) -> None:
                 "auth_enabled": False,
                 "current_user_email": None,
                 "current_user_name": None,
+                "is_admin_user": True,
             }
 
         return

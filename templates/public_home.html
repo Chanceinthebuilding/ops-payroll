@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <title>급여 데이터 없음</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', sans-serif; max-width: 640px; margin: 48px auto; padding: 0 16px; line-height: 1.6; }
+    h1 { font-size: 1.35rem; margin-bottom: 12px; }
+    p { color: #444; }
+    a { color: #06c; }
+  </style>
+</head>
+<body>
+  {% include '_nav.html' %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="flash {{ category }}" style="padding:12px;border-radius:8px;margin-bottom:16px;background:#fee;color:#c00;">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  <h1>공개된 급여 데이터가 없습니다</h1>
+  {% if is_admin_user %}
+  <p>관리자는 <a href="{{ url_for('admin') }}">급여 데이터 관리</a>에서 시프티 출퇴근 엑셀을 업로드하면, 모든 사용자에게 동일한 결과가 표시됩니다.</p>
+  {% else %}
+  <p>아직 등록된 급여 결과가 없습니다. 관리자에게 문의해 주세요.</p>
+  {% endif %}
+  {% if not auth_enabled %}
+  <p style="margin-top:16px;font-size:0.9rem;color:#666;"><a href="{{ url_for('admin') }}">급여 데이터 관리</a> (로컬 · AUTH_DISABLED)</p>
+  {% endif %}
+</body>
+</html>
