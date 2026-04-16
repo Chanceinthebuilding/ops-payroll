@@ -1,0 +1,20 @@
+# attendance_normalizer.py 의존성
+pandas>=2.0.0
+openpyxl>=3.0.0   # .xlsx 파일 읽기용
+pyyaml>=6.0       # rule_engine (policies.yaml)
+holidays>=0.40    # 한국 평일 공휴일 (유급휴일 반영용)
+
+# UI 앱
+streamlit>=1.28.0
+flask>=3.0.0
+flask-dance>=7.0.0
+python-dotenv>=1.0.0
+gunicorn>=22.0.0
+
+# 구글 시트 내보내기 (선택)
+gspread>=6.0.0
+google-auth>=2.0.0
+google-api-python-client>=2.0.0
+
+# Shiftee 자동 다운로드
+playwright>=1.40.0

@@ -1,0 +1,65 @@
+# 계약 유형 정의: scheduled_minutes(소정근로시간/일), break_minutes(휴게), weekdays(근무요일 0=월..4=금)
+contract_types:
+  standard_9to6:
+    scheduled_minutes: 480   # 9~18, 휴게 1h → 8h
+    break_minutes: 60
+    weekdays: [0, 1, 2, 3, 4]  # 월~금
+
+  freelancer_9to5:
+    scheduled_minutes: 420   # 9~17, 휴게 1h → 7h
+    break_minutes: 60
+    weekdays: [0, 1, 2, 3, 4]
+
+  freelancer_10to5:
+    scheduled_minutes: 360   # 10~17, 휴게 1h → 6h
+    break_minutes: 60
+    weekdays: [0, 1, 2, 3, 4]
+
+  freelancer_9to4:
+    scheduled_minutes: 360   # 9~16, 휴게 1h → 6h
+    break_minutes: 60
+    weekdays: [0, 1, 2, 3, 4]
+
+  standard_9to4.5:
+    scheduled_minutes: 420   # 9~16:30, 휴게 30분 → 7h
+    break_minutes: 30
+    weekdays: [0, 1, 2, 3, 4]
+
+  freelancer_9to6_MTW:
+    scheduled_minutes: 480   # 9~18, 휴게 1h → 8h, 월화수만
+    break_minutes: 60
+    weekdays: [0, 1, 2]  # 월, 화, 수
+
+  standard_10to6:
+    scheduled_minutes: 420   # 10~18, 휴게 1h → 7h, 월화수목금
+    break_minutes: 60
+    weekdays: [0, 1, 2, 3, 4]  # 월~금
+
+# 사원번호(또는 직원 식별자) → contract_type. 없으면 default 사용
+employee_contracts:
+  default: standard_9to6
+  "F114": freelancer_9to5
+  "F104": freelancer_10to5
+  "F102": freelancer_9to6_MTW
+  "F107": freelancer_9to6_MTW
+  "F111": freelancer_9to6_MTW
+  "F116": freelancer_9to6_MTW
+  "F117": freelancer_9to6_MTW
+  "F118": freelancer_9to6_MTW
+  "52": standard_10to6
+  "125": standard_9to4.5
+  "F119": freelancer_9to4
+  # F115: 시프티 미사용 · 일 6시간(360분) — 아래 no_shifty_attendance와 함께 사용
+  "F115": freelancer_10to5
+  # 예시 (필요 시 추가):
+  # "101": standard_9to6
+  # "F102": freelancer_9to5
+  # "104": freelancer_9to6_MTW
+
+# 시프티 출퇴근 엑셀에 없는 인원: 엑셀에 찍힌 날짜 범위(min~max) 안에서
+# 월~금이면서 한국 평일 공휴일이 아닌 날에만 근무 행을 자동 생성 (주말·평일 공휴일 제외).
+# 이미 해당 일자에 행이 있으면 덮어쓰지 않음(시프티·휴가 등과 병합 가능).
+no_shifty_attendance:
+  "F115":
+    employee_name: "석구(정석구)"  # payroll·시트에 나올 이름
+    daily_net_minutes: 360  # 6시간

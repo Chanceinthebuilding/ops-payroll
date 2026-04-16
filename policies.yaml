@@ -1,0 +1,14 @@
+contract_types:
+  standard_9to6:
+    weekly_allowance_policy: weekly_allowance_standard
+
+policies:
+
+  weekly_allowance_standard:
+    conditions:
+      - metric: total_work_minutes
+        operator: ">="
+        value: 2400
+      - metric: worked_days
+        operator: ">="
+        value: 5

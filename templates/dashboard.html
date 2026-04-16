@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <title>인건비 대시보드</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', sans-serif; max-width: 720px; margin: 0 auto; padding: 16px; line-height: 1.5; }
+    h1 { font-size: 1.35rem; margin: 8px 0 12px; }
+    .card { border: 1px solid #e0e0e0; border-radius: 12px; padding: 24px; background: #fafafa; color: #444; }
+  </style>
+</head>
+<body>
+  {% include '_nav.html' %}
+  <h1>인건비 대시보드</h1>
+  <div class="card">
+    <p>여기에 주간·일간 인건비 요약, 자동화 파이프라인 결과를 연결할 예정입니다.</p>
+    <p style="margin-top:12px;"><a href="{{ url_for('index') }}">← 엑셀 업로드로 이동</a></p>
+  </div>
+</body>
+</html>

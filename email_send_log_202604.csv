@@ -1,0 +1,5 @@
+﻿timestamp,to_email,to_email_hash,attach_name,status,error
+2026-03-19T11:29:27.958828,md***@naver.com,e55af2c0f4c7c884fd25380c20a1e3394fd550a694f26d4791e72d0289e7504e,급여명세서(근로기준1)_123_김찬범_202604.pdf,missing_pdf,
+2026-03-19T11:32:12.989683,md***@naver.com,e55af2c0f4c7c884fd25380c20a1e3394fd550a694f26d4791e72d0289e7504e,급여명세서(근로기준1)_123_김찬범_202604.pdf,fail,"(535, b'5.7.8 Username and Password not accepted. For more information, go to\n5.7.8  https://support.google.com/mail/?p=BadCredentials d2e1a72fcca58-82a6bbb9806sm4362929b3a.34 - gsmtp')"
+2026-03-19T11:33:04.543299,md***@naver.com,e55af2c0f4c7c884fd25380c20a1e3394fd550a694f26d4791e72d0289e7504e,급여명세서(근로기준1)_123_김찬범_202604.pdf,fail,"(535, b'5.7.8 Username and Password not accepted. For more information, go to\n5.7.8  https://support.google.com/mail/?p=BadCredentials 41be03b00d2f7-c741e563a20sm3568955a12.22 - gsmtp')"
+2026-03-19T12:54:15.617825,md***@naver.com,e55af2c0f4c7c884fd25380c20a1e3394fd550a694f26d4791e72d0289e7504e,급여명세서(근로기준1)_123_김찬범_202604.pdf,success,

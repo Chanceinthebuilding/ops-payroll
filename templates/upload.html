@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <title>HR 급여 검증 – 엑셀 업로드</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', sans-serif; max-width: 640px; margin: 48px auto; padding: 0 16px; }
+    h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    .sub { color: #666; margin-bottom: 24px; }
+    .zone {
+      border: 2px dashed #ccc;
+      border-radius: 12px;
+      padding: 48px 24px;
+      text-align: center;
+      background: #fafafa;
+      cursor: pointer;
+      transition: background .2s, border-color .2s;
+    }
+    .zone:hover, .zone.dragover { background: #f0f0f0; border-color: #888; }
+    .zone input { display: none; }
+    .zone p { margin: 0; color: #555; }
+    .zone .hint { margin-top: 8px; font-size: 0.9rem; color: #999; }
+    .btn { margin-top: 16px; padding: 12px 24px; background: #333; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+    .btn:hover { background: #555; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .flash { padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+    .flash.error { background: #fee; color: #c00; }
+    .flash.success { background: #efe; color: #060; }
+  </style>
+</head>
+<body>
+  {% include '_nav.html' %}
+  <h1>HR 급여 검증</h1>
+  <p class="sub">출퇴근 엑셀(필수)과 휴가 엑셀(선택)을 올리면 유급 휴가를 반영한 급여·일별 근무 결과를 확인할 수 있습니다.</p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="flash {{ category }}">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form action="/" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
+    <p class="sub" style="margin-bottom: 8px;"><strong>1. 출퇴근 엑셀</strong> (필수)</p>
+    <label class="zone" id="dropzone" for="file">
+      <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
+      <p id="label">출퇴근 엑셀을 여기에 끌어다 놓거나 클릭해서 선택하세요</p>
+      <p class="hint">.xlsx, .xls (시프티 출퇴근 형식)</p>
+    </label>
+    <p class="sub" style="margin: 24px 0 8px;"><strong>2. 휴가 엑셀</strong> (선택 – 유급/무급 휴가 반영 시)</p>
+    <label class="zone" id="dropzone2" for="file_leave">
+      <input type="file" name="file_leave" id="file_leave" accept=".xlsx,.xls">
+      <p id="label2">휴가 엑셀을 여기에 넣으세요 (없으면 비워 두세요)</p>
+      <p class="hint">사원번호, 날짜, 휴가유형(유급/무급), 분(또는 시간·일수)</p>
+    </label>
+    <div style="text-align: center;">
+      <p id="submitMsg" class="hint" hidden>처리 중… (엑셀 크기에 따라 10~30초 걸릴 수 있습니다)</p>
+      <button type="submit" class="btn" id="submitBtn" disabled>결과 보기</button>
+    </div>
+  </form>
+
+  <script>
+    var fileInput = document.getElementById('file');
+    var label = document.getElementById('label');
+    var dropzone = document.getElementById('dropzone');
+    var submitBtn = document.getElementById('submitBtn');
+
+    function updateLabel() {
+      if (fileInput.files.length) {
+        label.textContent = '선택: ' + fileInput.files[0].name;
+        submitBtn.disabled = false;
+      } else {
+        label.textContent = '출퇴근 엑셀을 여기에 끌어다 놓거나 클릭해서 선택하세요';
+        submitBtn.disabled = true;
+      }
+    }
+    var fileLeave = document.getElementById('file_leave');
+    var label2 = document.getElementById('label2');
+    var dropzone2 = document.getElementById('dropzone2');
+    function updateLabel2() {
+      label2.textContent = fileLeave.files.length ? '선택: ' + fileLeave.files[0].name : '휴가 엑셀을 여기에 넣으세요 (없으면 비워 두세요)';
+    }
+    fileInput.addEventListener('change', updateLabel);
+    fileLeave.addEventListener('change', updateLabel2);
+    dropzone.addEventListener('dragover', function(e) { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', function() { dropzone.classList.remove('dragover'); });
+    dropzone.addEventListener('drop', function(e) {
+      e.preventDefault(); dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; updateLabel(); }
+    });
+    dropzone2.addEventListener('dragover', function(e) { e.preventDefault(); dropzone2.classList.add('dragover'); });
+    dropzone2.addEventListener('dragleave', function() { dropzone2.classList.remove('dragover'); });
+    dropzone2.addEventListener('drop', function(e) {
+      e.preventDefault(); dropzone2.classList.remove('dragover');
+      if (e.dataTransfer.files.length) { fileLeave.files = e.dataTransfer.files; updateLabel2(); }
+    });
+  </script>
+</body>
+</html>

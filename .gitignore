@@ -1,0 +1,23 @@
+# 인증 정보
+shiftee_credentials.py
+.env
+
+# Playwright 세션
+shiftee_session.json
+
+# 디버그 스크린샷
+debug_*.png
+
+# 파이프라인 입출력
+input/
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 구글 서비스 계정 키
+credentials/
+.keys/
+*.json

@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <title>급여·근무 결과</title>
+  <style>
+    * { box-sizing: border-box; }
+    /* 뷰 테이블 가로 폭: max-width를 늘리면 가로 스크롤이 줄어듦 (예: 3600px, 98vw) */
+    body { font-family: 'Malgun Gothic', sans-serif; max-width: 3600px; margin: 0 auto; padding: 16px 12px; line-height: 1.4; }
+    h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    .back { margin-bottom: 24px; }
+    .back a { color: #06c; text-decoration: none; }
+    .back a:hover { text-decoration: underline; }
+    section { margin-bottom: 40px; }
+    section h2 { font-size: 1.2rem; margin-bottom: 12px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    .table-wrap-payroll { overflow: visible; }
+    .table-wrap-payroll .table-wrap-x { overflow-x: auto; overflow-y: visible; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: auto; }
+    th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: center; word-break: keep-all; white-space: nowrap; }
+    th.th-two-line { white-space: pre-line; }
+    /* (주휴용) 문구만 폰트 크기 조정 — 아래 값을 바꾸면 됨 */
+    .th-weekly-label { font-size: 0.7em; }
+    th { background: #f5f5f5; }
+    /* 페이지 스크롤 시 헤더 행이 화면 상단에 고정 */
+    table.table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f5f5f5;
+      box-shadow: 0 1px 0 0 #ddd;
+    }
+    table.table thead th.col-weekly { background: #b8d4e8; }
+    /* 급여 컬럼 정렬 가능 헤더 */
+    th.th-sortable { cursor: pointer; user-select: none; }
+    th.th-sortable:hover { background: #e8e8e8; }
+    th.th-sortable .sort-icon { font-size: 0.7em; opacity: 0.6; margin-left: 2px; }
+    th.th-sortable.sort-asc .sort-icon::after { content: ' ▲'; }
+    th.th-sortable.sort-desc .sort-icon::after { content: ' ▼'; }
+    tr:nth-child(even) { background: #fafafa; }
+    .empty { color: #999; font-style: italic; }
+    .cell-normal { background: transparent; }
+    .cell-paid_leave { background: #d4edda; }
+    .cell-unpaid_leave { background: #fff3cd; }
+    /* 동일 일자 유급+무급 혼합: 연두/노랑 대각 분할 */
+    .cell-mixed_leave {
+      background: linear-gradient(135deg, #d4edda 0% 50%, #fff3cd 50% 100%);
+    }
+    tr:nth-child(even) td.cell-mixed_leave {
+      background: linear-gradient(135deg, #c3e6cb 0% 50%, #ffe69c 50% 100%);
+    }
+    .cell-absent { background: #f8d7da; }
+    .cell-over-8 { background-color: #e8e0f0; }
+    tr:nth-child(even) td.cell-over-8 { background-color: #ddd5e8; }
+    /* Row Hover: 셀에 마우스를 올리면 해당 행 겉테두리만 (셀 색 유지) */
+    table tbody tr td { transition: box-shadow 0.2s ease; }
+    table tbody tr:hover td {
+      position: relative;
+      z-index: 1;
+      border-left: none;
+      border-right: none;
+    }
+    table tbody tr:hover td:first-child:last-child {
+      box-shadow: inset 0 0 0 3px #e81abb;
+    }
+    table tbody tr:hover td:first-child:not(:last-child) {
+      box-shadow: inset 3px 0 0 0 #e81abb, inset 0 3px 0 0 #e81abb, inset 0 -3px 0 0 #e81abb;
+    }
+    table tbody tr:hover td:last-child:not(:first-child) {
+      box-shadow: inset -3px 0 0 0 #e81abb, inset 0 3px 0 0 #e81abb, inset 0 -3px 0 0 #e81abb;
+    }
+    table tbody tr:hover td:not(:first-child):not(:last-child) {
+      box-shadow: inset 0 3px 0 0 #e81abb, inset 0 -3px 0 0 #e81abb;
+    }
+    /* 주휴 제외 일자 컬럼: 소수가 .0·.5가 아닌 근무시간 → 빨간 빗금(텍스트 색은 기본 유지) */
+    .text-non-half {
+      background-image: repeating-linear-gradient(
+        -45deg,
+        rgba(220, 53, 69, 0.35) 0,
+        rgba(220, 53, 69, 0.35) 4px,
+        transparent 4px,
+        transparent 8px
+      );
+    }
+    /* 주휴 컬럼: 진한 색 */
+    th.col-weekly, td.col-weekly { background: #b8d4e8; }
+    tr:nth-child(even) td.col-weekly { background: #a8c8dc; }
+    .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
+    .btn-export { background: #1a73e8; color: #fff; }
+    .btn-export:hover { background: #1557b0; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 420px; width: 90%; }
+    .modal h3 { margin: 0 0 12px 0; font-size: 1.1rem; }
+    .modal p { margin: 0 0 20px 0; color: #555; }
+    .modal .actions { display: flex; gap: 12px; justify-content: flex-end; }
+    .modal .btn-ok { background: #1a73e8; color: #fff; }
+    .modal .btn-ok:hover { background: #1557b0; }
+    .modal .btn-cancel { background: #e0e0e0; color: #333; }
+    .modal .btn-cancel:hover { background: #ccc; }
+    .modal .msg { margin-top: 12px; font-size: 0.9rem; }
+    .modal .msg.success { color: #0a0; }
+    .modal .msg.error { color: #c00; }
+    .btn-autofill:hover { background: #218838; }
+    /* 계약(사번없음): 최소 폭만 차지, 드롭다운만 표시 */
+    th.th-contract-select,
+    td.contract-select-cell {
+      width: 1%;
+      max-width: 100px;
+      min-width: 72px;
+      white-space: nowrap;
+      padding: 4px 6px;
+      font-size: 0.8rem;
+      background: #f9f9f9;
+    }
+    tr:nth-child(even) td.contract-select-cell { background: #f0f0f0; }
+    th.th-contract-select { font-size: 0.75rem; color: #666; }
+    td.contract-select-cell .contract-select {
+      width: 100%;
+      max-width: 92px;
+      padding: 2px 4px;
+      font-size: 0.8rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #fff;
+    }
+    td.contract-select-cell .text-muted { font-size: 0.75rem; color: #999; }
+  </style>
+</head>
+<body>
+  {% include '_nav.html' %}
+  <div class="back"><a href="/">← 다시 업로드</a></div>
+  <h1>급여·근무 결과</h1>
+  <p>업로드한 엑셀 기준으로 계산된 결과입니다.</p>
+  <p style="margin-bottom: 16px;">
+    <button type="button" class="btn btn-export" id="btnExportGoogle">구글 시트 내보내기</button>
+  </p>
+
+  <div class="modal-overlay" id="exportModal">
+    <div class="modal">
+      <h3>구글 시트 내보내기</h3>
+      <p>급여 결과를 새 구글 시트로 생성합니다. OK를 누르면 시트가 만들어지고 링크가 표시됩니다.</p>
+      <div class="actions">
+        <button type="button" class="btn btn-cancel" id="btnModalCancel">취소</button>
+        <button type="button" class="btn btn-ok" id="btnModalOk">OK</button>
+      </div>
+      <p class="msg" id="exportMsg"></p>
+    </div>
+  </div>
+
+  <section>
+    <h2>급여 결과 (payroll_result)</h2>
+    <p class="legend">
+      <span class="cell-paid_leave" style="padding:2px 8px;">연차(유급)</span>
+      <span class="cell-unpaid_leave" style="padding:2px 8px; margin-left:8px;">오프/무급</span>
+      <span class="cell-mixed_leave" style="padding:2px 8px; margin-left:8px;">유급+무급(같은 날)</span>
+      <span class="cell-absent" style="padding:2px 8px; margin-left:8px;">결근/이상</span>
+      <span class="text-non-half" style="margin-left:8px;">소수 .0·.5 아님</span>
+      <span class="cell-over-8" style="padding:2px 8px; margin-left:8px;">8시간 초과</span>
+    </p>
+    <p class="filter-legend" style="margin: 12px 0;">
+      <label><input type="radio" name="payrollFilter" value="전체보기" checked> 전체보기</label>
+      <label style="margin-left: 16px;"><input type="radio" name="payrollFilter" value="정규직"> 정규직</label>
+      <label style="margin-left: 16px;"><input type="radio" name="payrollFilter" value="상용직"> 상용직</label>
+      <label style="margin-left: 16px;"><input type="radio" name="payrollFilter" value="프리랜스"> 프리랜스</label>
+      <label style="margin-left: 16px;">직원 선택</label>
+      <select id="payrollEmployeeFilter" style="margin-left: 4px;">
+        <option value="">전체 직원</option>
+      </select>
+    </p>
+    <p class="autofill-legend" style="margin: 12px 0;">
+      <strong>빈칸 자동채우기:</strong>
+      <label style="margin-left: 8px;"><input type="checkbox" id="autofillUseContract" checked> 계약 근무시간 적용</label>
+      <label style="margin-left: 8px;">대상</label>
+      <select id="autofillTarget" style="margin-left: 4px;">
+        <option value="">전체 일자</option>
+      </select>
+      <label style="margin-left: 12px;">채울 시간(시간)</label>
+      <input type="number" id="autofillHours" value="8" min="0" max="24" step="0.5" style="width: 60px; margin-left: 4px;">
+      <button type="button" class="btn btn-autofill" id="btnAutofill" style="margin-left: 8px; background: #28a745; color: #fff;">적용</button>
+      <span class="autofill-hint" style="margin-left: 8px; color: #666; font-size: 0.9rem;">계약 적용 시 6·7·8시간 등 직원별 소정근로시간으로 채웁니다. 적용 시 기본급~합계가 자동 재계산됩니다.</span>
+    </p>
+    <div class="table-wrap table-wrap-payroll">
+      <div class="table-wrap-x">
+      {% if use_payroll_table %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="th-sortable" data-col="employee_id" title="클릭 시 오름/내림차순 정렬 (세 번째 클릭 시 원래 순서)">사번 <span class="sort-icon"></span></th>
+            <th>직원</th>
+            <th class="th-contract-select" title="사번이 없는 인원만 선택 (계약 종류 → 소정근로시간 반영)">계약</th>
+            {% for col, date_key, typ in payroll_cell_list %}
+            <th class="{{ 'col-weekly' if typ == 'weekly' else '' }}{{ ' th-two-line' if '주휴용' in (col|string) else '' }}">{% if '\n' in (col|string) and '주휴용' in (col|string) %}{{ (col|string).split('\n')[0] }}<br><span class="th-weekly-label">{{ (col|string).split('\n')[1] }}</span>{% else %}{{ col }}{% endif %}</th>
+            {% endfor %}
+            {% for c in pay_cols %}<th class="th-sortable" data-col="{{ c }}" title="클릭 시 오름/내림차순 정렬 (세 번째 클릭 시 원래 순서)">{{ pay_col_display[c] | safe }} <span class="sort-icon"></span></th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payroll_rows %}
+          <tr data-emp-type="{{ row.get('_emp_type', '상용직') }}" data-scheduled-hours="{{ row.get('_scheduled_hours', 8) }}"{% if row.get('_no_id_contract') %} data-no-id-contract="1"{% endif %}>
+            <td data-col="employee_id">{{ row.employee_id }}</td>
+            <td data-col="employee_name">{{ row.employee_name }}</td>
+            <td class="contract-select-cell">
+              {% if row.get('_no_id_contract') and contract_options %}
+              <select class="contract-select" data-default-hours="{{ row.get('_scheduled_hours', 8) }}" title="계약 선택 시 해당 소정근로시간으로 재계산됩니다">
+                {% for opt in contract_options %}
+                <option value="{{ opt.id }}" data-scheduled-hours="{{ opt.scheduled_hours }}"{% if (row.get('_scheduled_hours')|string) == (opt.scheduled_hours|string) %} selected{% endif %}>{{ opt.label }}</option>
+                {% endfor %}
+              </select>
+              {% else %}
+              <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            {% for col, date_key, typ in payroll_cell_list %}
+              {% if typ == 'weekly' %}
+              {% set wval = row[col] %}
+              {% set w_over_8 = col in row.get('_over_8_cols', []) %}
+              <td class="col-weekly{{ ' cell-over-8' if w_over_8 else '' }}" data-col="{{ col }}" data-is-weekly="true" data-type="number" contenteditable="true">{{ wval }}</td>
+              {% else %}
+              {% set val = row[col] %}
+              {% set is_empty = (val is none or val == '') %}
+              {% set dkey = (row.employee_id|string) + '|' + date_key if date_key else '' %}
+              {% set cell_class = ('cell-normal' if (is_empty and dkey in (non_scheduled_set or [])) else ('cell-absent' if is_empty else ('cell-' + (day_flags.get(dkey, 'normal'))))) %}
+              {% set is_non_half = val|is_non_half_hour %}
+              {% set is_over_8 = col in row.get('_over_8_cols', []) %}
+              {# 주휴용 = 산정기간 이전 일자: 주휴 산정 참고용만. 기본급·야근 합산에서 반드시 제외 #}
+              {% if '주휴용' in (col|string) %}
+              <td class="{{ cell_class }}{{ ' text-non-half' if is_non_half else '' }}{{ ' cell-over-8' if is_over_8 else '' }}" data-col="{{ col }}" data-type="number" data-is-prior-weekly="true" contenteditable="true">{{ val if not is_empty else '' }}</td>
+              {% else %}
+              <td class="{{ cell_class }}{{ ' text-non-half' if is_non_half else '' }}{{ ' cell-over-8' if is_over_8 else '' }}" data-col="{{ col }}" data-type="number" data-is-date="true" contenteditable="true">{{ val if not is_empty else '' }}</td>
+              {% endif %}
+              {% endif %}
+            {% endfor %}
+            {% for c in pay_cols %}
+            <td data-col="{{ c }}" data-type="number" contenteditable="true">{{ row[c] }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      {{ payroll_html_fallback | safe }}
+      {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <details>
+      <summary style="cursor:pointer; font-weight:bold; margin-bottom:8px;">
+        일별 근무 (daily_summary)
+      </summary>
+      <div class="table-wrap" style="margin-top:8px;">
+        {{ daily | safe }}
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>이상치 (anomaly_report)</h2>
+    {% if anomaly %}
+      <div class="table-wrap">
+        {{ anomaly | safe }}
+      </div>
+    {% else %}
+      <p class="empty">이상치 없음</p>
+    {% endif %}
+  </section>
+
+  <div class="back"><a href="/">← 다시 업로드</a></div>
+
+  <script>
+    (function() {
+        var payrollTable = document.querySelector('section table.table');
+        if (payrollTable) {
+          // 급여 재계산 상수 (서버 _recalc_pay_from_date_columns와 동일)
+          var PAY_HOURLY = 11000, PAY_OT_MULT = 1.5, PAY_CAP_MIN = 8 * 60;
+          // 프리랜서 명절(공휴일) 근무 = 전부 야근 반영 (빈칸 자동채우기 후 재계산 시 유지)
+          var PAYROLL_HOLIDAY_COLS = {{ (holiday_cols or {}) | tojson }};
+          var PAYROLL_FREELANCER_IDS = {{ (freelancer_ids or {}) | tojson }};
+          function parseNum(td) {
+            if (!td) return NaN;
+            var t = (td.textContent || '').trim().replace(/,/g, '');
+            if (t === '') return NaN;
+            var n = parseFloat(t); return isNaN(n) ? NaN : n;
+          }
+          function updateDateCellClass(td) {
+            var v = parseNum(td);
+            td.classList.remove('cell-absent', 'cell-over-8', 'text-non-half');
+            if (isNaN(v) || (td.textContent || '').trim() === '') {
+              td.classList.add('cell-absent');
+            } else {
+              td.classList.add('cell-normal');
+              if (v > 8) td.classList.add('cell-over-8');
+              var frac = v - Math.floor(v);
+              if (frac > 0.05 && Math.abs(frac - 0.5) > 0.05) td.classList.add('text-non-half');
+            }
+          }
+          function recalcRow(tr) {
+            var capMin = PAY_CAP_MIN;
+            var sh = tr.getAttribute('data-scheduled-hours');
+            if (sh != null && String(sh).trim() !== '') {
+              var h = parseFloat(sh);
+              if (!isNaN(h) && h > 0) capMin = h * 60;
+            }
+            var empIdTd = tr.querySelector('td[data-col="employee_id"]');
+            var empId = empIdTd ? (empIdTd.textContent || '').trim() : '';
+            var empIdNorm = empId;
+            try { var n = parseFloat(empId); if (!isNaN(n) && n === Math.floor(n)) empIdNorm = String(Math.floor(n)); } catch(e) {}
+            var contractType = (tr.getAttribute('data-contract-type') || '').trim();
+            var isFreelancer = (contractType.indexOf('freelancer_') === 0) || (PAYROLL_FREELANCER_IDS && (PAYROLL_FREELANCER_IDS[empId] || PAYROLL_FREELANCER_IDS[empIdNorm]));
+            var dateTds = tr.querySelectorAll('td[data-is-date="true"]');
+            var base = 0, ot = 0;
+            dateTds.forEach(function(td) {
+              // data-col 전체에 '주휴용' 포함 시 제외( split('\n')[0]만 쓰면 '1/20'만 남아 오탐 )
+              var colFull = td.getAttribute('data-col') || '';
+              if (colFull.indexOf('주휴용') !== -1) return;
+              var col = colFull.split('\n')[0].trim();
+              var h = parseNum(td); if (isNaN(h)) return;
+              var mins = h * 60;
+              var isHoliday = PAYROLL_HOLIDAY_COLS && PAYROLL_HOLIDAY_COLS[col];
+              if (isFreelancer && isHoliday) {
+                base += 0;
+                ot += mins / 60 * PAY_HOURLY * PAY_OT_MULT;
+              } else {
+                base += Math.min(mins, capMin) / 60 * PAY_HOURLY;
+                ot += Math.max(mins - capMin, 0) / 60 * PAY_HOURLY * PAY_OT_MULT;
+              }
+            });
+            // 주휴 컬럼(주휴1, …) 합계 × 시급 = 주휴수당 — 일자 셀 수정과 동일하게 실시간 반영
+            var waHoursSum = 0;
+            tr.querySelectorAll('td[data-is-weekly="true"]').forEach(function(td) {
+              var col = (td.getAttribute('data-col') || '').split('\n')[0].trim();
+              if (col.indexOf('주휴용') !== -1) return;
+              var wh = parseNum(td);
+              if (!isNaN(wh)) waHoursSum += wh;
+            });
+            var waHoursRounded = Math.round(waHoursSum * 10) / 10;
+            var wa = Math.round(waHoursRounded * PAY_HOURLY);
+            var waHoursTd = tr.querySelector('td[data-col="weekly_allowance_hours"]');
+            if (waHoursTd) waHoursTd.textContent = waHoursRounded.toFixed(1);
+            var waPayTd = tr.querySelector('td[data-col="weekly_allowance_pay"]');
+            if (waPayTd) waPayTd.textContent = Math.round(wa).toLocaleString();
+            var total = base + ot + wa;
+            var otHours = ot / (PAY_HOURLY * PAY_OT_MULT);
+            function setPay(col, val, isInt) {
+              var el = tr.querySelector('td[data-col="' + col + '"]');
+              if (el) el.textContent = isInt ? Math.round(val).toLocaleString() : (Math.round(val * 10) / 10).toFixed(1);
+            }
+            setPay('base_pay', base, true);
+            setPay('overtime_pay', ot, true);
+            setPay('overtime_hours', otHours, false);
+            setPay('total_pay', total, true);
+          }
+          function recalcAllRows() {
+            var tbody = payrollTable.querySelector('tbody');
+            if (tbody) tbody.querySelectorAll('tr').forEach(recalcRow);
+          }
+
+          // 사번없음 계약 선택: 선택 시 해당 행 소정시간·재계산 반영
+          payrollTable.addEventListener('change', function(e) {
+            if (e.target.classList && e.target.classList.contains('contract-select')) {
+              var tr = e.target.closest('tr');
+              if (!tr) return;
+              var opt = e.target.options[e.target.selectedIndex];
+              var hours = opt.getAttribute('data-scheduled-hours');
+              var ctype = opt.value;
+              tr.setAttribute('data-scheduled-hours', hours || '8');
+              tr.setAttribute('data-contract-type', ctype || '');
+              recalcRow(tr);
+            }
+          });
+          (function initContractSelects() {
+            payrollTable.querySelectorAll('select.contract-select').forEach(function(sel) {
+              var tr = sel.closest('tr');
+              var opt = sel.options[sel.selectedIndex];
+              if (opt && tr) {
+                tr.setAttribute('data-contract-type', opt.value || '');
+              }
+            });
+          })();
+
+          var PAY_COLS_UNDO = ['base_pay', 'overtime_pay', 'overtime_hours', 'total_pay'];
+          var autofillUndoStack = [];
+          var MAX_UNDO = 20;
+
+          function snapshotTable() {
+            var tbody = payrollTable.querySelector('tbody');
+            if (!tbody) return null;
+            var rows = tbody.querySelectorAll('tr');
+            var snap = [];
+            rows.forEach(function(tr) {
+              var dateCells = {};
+              tr.querySelectorAll('td[data-is-date="true"]').forEach(function(td) {
+                var col = (td.getAttribute('data-col') || '').split('\n')[0].trim();
+                if (col) dateCells[col] = (td.textContent || '').trim();
+              });
+              var payCells = {};
+              PAY_COLS_UNDO.forEach(function(c) {
+                var el = tr.querySelector('td[data-col="' + c + '"]');
+                payCells[c] = el ? (el.textContent || '').trim() : '';
+              });
+              snap.push({ dateCells: dateCells, payCells: payCells });
+            });
+            return snap;
+          }
+
+          function restoreSnapshot(snap) {
+            var tbody = payrollTable.querySelector('tbody');
+            if (!tbody || !snap || !snap.length) return;
+            var rows = tbody.querySelectorAll('tr');
+            for (var i = 0; i < rows.length && i < snap.length; i++) {
+              var tr = rows[i], rowSnap = snap[i];
+              tr.querySelectorAll('td[data-is-date="true"]').forEach(function(td) {
+                var col = (td.getAttribute('data-col') || '').split('\n')[0].trim();
+                if (col && rowSnap.dateCells.hasOwnProperty(col)) {
+                  td.textContent = rowSnap.dateCells[col];
+                  updateDateCellClass(td);
+                }
+              });
+              PAY_COLS_UNDO.forEach(function(c) {
+                var el = tr.querySelector('td[data-col="' + c + '"]');
+                if (el && rowSnap.payCells.hasOwnProperty(c)) el.textContent = rowSnap.payCells[c];
+              });
+            }
+          }
+
+          // 빈칸 자동채우기: 계약 근무시간 또는 입력값으로 적용 → 셀 색·합계 실시간 반영
+          var btnAutofill = document.getElementById('btnAutofill');
+          var autofillHours = document.getElementById('autofillHours');
+          var autofillTarget = document.getElementById('autofillTarget');
+          var autofillUseContract = document.getElementById('autofillUseContract');
+          var autofillHint = document.querySelector('.autofill-hint');
+          if (btnAutofill && autofillHours && autofillTarget) {
+            var tbody = payrollTable.querySelector('tbody');
+            if (tbody) {
+              var dateCols = [];
+              var firstRow = tbody.querySelector('tr');
+              if (firstRow) {
+                firstRow.querySelectorAll('td[data-is-date="true"]').forEach(function(td) {
+                  var col = (td.getAttribute('data-col') || '').split('\n')[0].trim();
+                  if (col && dateCols.indexOf(col) === -1) dateCols.push(col);
+                });
+                dateCols.sort(function(a, b) {
+                  var pa = a.split('/'), pb = b.split('/');
+                  var ma = parseInt(pa[0], 10) || 0, da = parseInt(pa[1], 10) || 0;
+                  var mb = parseInt(pb[0], 10) || 0, db = parseInt(pb[1], 10) || 0;
+                  return ma !== mb ? ma - mb : da - db;
+                });
+                dateCols.forEach(function(col) {
+                  var opt = document.createElement('option');
+                  opt.value = col;
+                  opt.textContent = col;
+                  autofillTarget.appendChild(opt);
+                });
+              }
+              // 일자 셀 수정 시 해당 행 재계산·셀 색 갱신
+              tbody.addEventListener('blur', function(e) {
+                if (e.target.matches && e.target.matches('td[data-is-date="true"]')) {
+                  updateDateCellClass(e.target);
+                  recalcRow(e.target.closest('tr'));
+                }
+                if (e.target.matches && e.target.matches('td[data-is-weekly="true"]')) {
+                  updateDateCellClass(e.target);
+                  recalcRow(e.target.closest('tr'));
+                }
+              }, true);
+            }
+            btnAutofill.addEventListener('click', function() {
+              var tbody = payrollTable.querySelector('tbody');
+              if (!tbody) return;
+              var snap = snapshotTable();
+              if (snap) {
+                autofillUndoStack.push(snap);
+                if (autofillUndoStack.length > MAX_UNDO) autofillUndoStack.shift();
+              }
+              var inputVal = parseFloat(autofillHours.value);
+              if (isNaN(inputVal) || inputVal < 0) { inputVal = 8; autofillHours.value = '8'; }
+              var useContract = autofillUseContract && autofillUseContract.checked;
+              var targetCol = (autofillTarget.value || '').trim();
+              var count = 0;
+              tbody.querySelectorAll('td[data-is-date="true"]').forEach(function(td) {
+                var col = (td.getAttribute('data-col') || '').split('\n')[0].trim();
+                if (targetCol && col !== targetCol) return;
+                /* 무급휴가(노란색) 셀은 건드리지 않음 — 기존 값(예: 4.0) 유지 */
+                if (td.classList.contains('cell-unpaid_leave') || td.classList.contains('cell-mixed_leave')) return;
+                var tr = td.closest('tr');
+                var isEmpty = (td.textContent || '').trim() === '';
+                var isPaidLeave = td.classList.contains('cell-paid_leave');
+
+                if (isPaidLeave) {
+                  /* 유급휴가(초록) 셀: 숫자만 채우기 값으로 변경, 초록색 유지. 계약 시 min(입력값, 소정근로) 적용 */
+                  var hrs = inputVal;
+                  if (useContract && tr) {
+                    var s = parseFloat(tr.getAttribute('data-scheduled-hours'));
+                    if (!isNaN(s)) hrs = Math.min(hrs, s);
+                  }
+                  var displayVal = hrs % 1 === 0 ? String(Math.round(hrs)) : String(hrs);
+                  td.textContent = displayVal;
+                  td.classList.remove('cell-absent', 'cell-over-8', 'text-non-half');
+                  td.classList.add('cell-paid_leave');
+                  count++;
+                  return;
+                }
+                if (!isEmpty) return; /* 빈 칸만 채움 (유급휴가 제외) */
+                var hrs = inputVal;
+                if (useContract && tr) {
+                  var s = parseFloat(tr.getAttribute('data-scheduled-hours'));
+                  if (!isNaN(s)) hrs = s;
+                }
+                var displayVal = hrs % 1 === 0 ? String(Math.round(hrs)) : String(hrs);
+                td.textContent = displayVal;
+                updateDateCellClass(td);
+                count++;
+              });
+              recalcAllRows();
+              if (autofillHint) {
+                if (count > 0) autofillHint.textContent = count + '개 셀 적용·합계 재계산 완료. Ctrl+Z로 실행 취소. ' + (useContract ? '계약 근무시간 반영.' : '');
+                else autofillHint.textContent = targetCol ? '선택한 일자(' + targetCol + ')에 해당하는 셀이 없습니다.' : '대상 일자 셀이 없습니다.';
+              }
+            });
+
+            document.addEventListener('keydown', function(e) {
+              if (e.ctrlKey && e.key === 'z') {
+                if (autofillUndoStack.length > 0) {
+                  e.preventDefault();
+                  restoreSnapshot(autofillUndoStack.pop());
+                  if (autofillHint) autofillHint.textContent = '실행 취소했습니다.';
+                }
+              }
+            });
+          }
+
+        var filterInputs = document.querySelectorAll('input[name="payrollFilter"]');
+        var employeeFilter = document.getElementById('payrollEmployeeFilter');
+        function selectedEmpType() {
+          var checked = document.querySelector('input[name="payrollFilter"]:checked');
+          return checked ? checked.value : '전체보기';
+        }
+        function applyPayrollFilters() {
+          var typeVal = selectedEmpType();
+          var empVal = employeeFilter ? (employeeFilter.value || '') : '';
+          var rows = payrollTable.querySelectorAll('tbody tr');
+          rows.forEach(function(tr) {
+            var type = tr.getAttribute('data-emp-type');
+            var eidTd = tr.querySelector('td[data-col="employee_id"]');
+            var nameTd = tr.querySelector('td[data-col="employee_name"]');
+            var empKey = '';
+            if (eidTd || nameTd) {
+              var eid = eidTd ? (eidTd.textContent || '').trim() : '';
+              var ename = nameTd ? (nameTd.textContent || '').trim() : '';
+              empKey = eid + '|' + ename;
+            }
+            var typeMatch = (typeVal === '전체보기') || (type === typeVal);
+            var empMatch = (!empVal) || (empKey === empVal);
+            tr.style.display = (typeMatch && empMatch) ? '' : 'none';
+          });
+        }
+        if (employeeFilter) {
+          var tbodyForFilter = payrollTable.querySelector('tbody');
+          if (tbodyForFilter) {
+            var seen = {};
+            Array.from(tbodyForFilter.querySelectorAll('tr')).forEach(function(tr) {
+              var eidTd = tr.querySelector('td[data-col="employee_id"]');
+              var nameTd = tr.querySelector('td[data-col="employee_name"]');
+              var eid = eidTd ? (eidTd.textContent || '').trim() : '';
+              var ename = nameTd ? (nameTd.textContent || '').trim() : '';
+              var key = eid + '|' + ename;
+              if (!key || seen[key]) return;
+              seen[key] = true;
+              var opt = document.createElement('option');
+              opt.value = key;
+              opt.textContent = (eid ? '[' + eid + '] ' : '') + ename;
+              employeeFilter.appendChild(opt);
+            });
+          }
+          employeeFilter.addEventListener('change', applyPayrollFilters);
+        }
+        filterInputs.forEach(function(input) {
+          input.addEventListener('change', applyPayrollFilters);
+        });
+
+        // 원래 행 순서 저장 (정렬 해제 시 복원용)
+        var tbody = payrollTable.querySelector('tbody');
+        if (tbody) {
+          Array.from(tbody.querySelectorAll('tr')).forEach(function(tr, i) {
+            tr.setAttribute('data-original-index', String(i));
+          });
+        }
+        // 사번·급여 컬럼 헤더 클릭: 1회 오름차순, 2회 내림차순, 3회 정렬 해제(원래 순서)
+        function parseCellNumber(td) {
+          if (!td) return NaN;
+          var text = (td.textContent || '').trim().replace(/,/g, '');
+          if (text === '' || text === '-') return NaN;
+          var n = parseFloat(text);
+          return isNaN(n) ? NaN : n;
+        }
+        function compareCell(col, cellA, cellB, sign) {
+          if (col === 'employee_id') {
+            var tA = (cellA && cellA.textContent || '').trim();
+            var tB = (cellB && cellB.textContent || '').trim();
+            var nA = parseFloat(tA.replace(/,/g, ''));
+            var nB = parseFloat(tB.replace(/,/g, ''));
+            if (!isNaN(nA) && !isNaN(nB)) return (nA - nB) * sign;
+            return (tA.localeCompare(tB, 'ko') || 0) * sign;
+          }
+          var vA = parseCellNumber(cellA);
+          var vB = parseCellNumber(cellB);
+          if (isNaN(vA) && isNaN(vB)) return 0;
+          if (isNaN(vA)) return 1;
+          if (isNaN(vB)) return -1;
+          return (vA - vB) * sign;
+        }
+        payrollTable.querySelectorAll('thead th.th-sortable').forEach(function(th) {
+          th.addEventListener('click', function() {
+            var col = this.getAttribute('data-col');
+            if (!col) return;
+            var tbody = payrollTable.querySelector('tbody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            var isAsc = this.classList.contains('sort-asc');
+            var isDesc = this.classList.contains('sort-desc');
+            payrollTable.querySelectorAll('thead th.th-sortable').forEach(function(h) {
+              h.classList.remove('sort-asc', 'sort-desc');
+            });
+            if (isDesc) {
+              // 세 번째 클릭: 정렬 해제 → 원래 순서
+              rows.sort(function(a, b) {
+                var iA = parseInt(a.getAttribute('data-original-index'), 10) || 0;
+                var iB = parseInt(b.getAttribute('data-original-index'), 10) || 0;
+                return iA - iB;
+              });
+            } else {
+              var nextAsc = !isAsc;
+              this.classList.add(nextAsc ? 'sort-asc' : 'sort-desc');
+              var sign = nextAsc ? 1 : -1;
+              rows.sort(function(a, b) {
+                var cellA = a.querySelector('td[data-col="' + col + '"]');
+                var cellB = b.querySelector('td[data-col="' + col + '"]');
+                return compareCell(col, cellA, cellB, sign);
+              });
+            }
+            rows.forEach(function(tr) { tbody.appendChild(tr); });
+          });
+        });
+      }
+
+      function collectPayrollTableData() {
+        if (!payrollTable) return null;
+        if (!payrollTable.querySelector('td[data-col]')) return null;
+
+        var rows = [];
+        var bodyRows = payrollTable.querySelectorAll('tbody tr');
+        bodyRows.forEach(function(tr) {
+          var rowData = {};
+          var tds = tr.querySelectorAll('td');
+          tds.forEach(function(td) {
+            var col = td.getAttribute('data-col');
+            if (!col) return;
+            var value = td.textContent.trim();
+            rowData[col] = value;
+          });
+          if (tr.getAttribute('data-no-id-contract') && tr.getAttribute('data-contract-type')) {
+            rowData._contract_override = tr.getAttribute('data-contract-type');
+          }
+          if (Object.keys(rowData).length > 0) {
+            rows.push(rowData);
+          }
+        });
+        return { rows: rows };
+      }
+
+      var btn = document.getElementById('btnExportGoogle');
+      var modal = document.getElementById('exportModal');
+      var btnOk = document.getElementById('btnModalOk');
+      var btnCancel = document.getElementById('btnModalCancel');
+      var msg = document.getElementById('exportMsg');
+
+      function closeModal() { modal.classList.remove('open'); msg.textContent = ''; }
+      function showMsg(text, isError) {
+        msg.textContent = text;
+        msg.className = 'msg ' + (isError ? 'error' : 'success');
+      }
+
+      btn.addEventListener('click', function() {
+        modal.classList.add('open');
+      });
+      btnCancel.addEventListener('click', closeModal);
+      modal.addEventListener('click', function(e) {
+        if (e.target === modal) closeModal();
+      });
+
+      btnOk.addEventListener('click', function() {
+        btnOk.disabled = true;
+        msg.textContent = '생성 중…';
+        msg.className = 'msg';
+
+        var exportUrl = {{ (export_url or '/export-google-sheet') | tojson }};
+        var payload = collectPayrollTableData();
+        var fetchOptions = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin'
+        };
+        if (payload && payload.rows && payload.rows.length) {
+          fetchOptions.body = JSON.stringify(payload);
+        }
+
+        fetch(exportUrl, fetchOptions)
+          .then(function(r) {
+            return r.text().then(function(text) {
+              try {
+                return { ok: r.ok, data: JSON.parse(text) };
+              } catch (_) {
+                throw new Error('서버 오류(' + r.status + '). 응답이 JSON이 아닙니다. 터미널/콘솔 로그를 확인하세요.');
+              }
+            });
+          })
+          .then(function(res) {
+            btnOk.disabled = false;
+            var data = res.data;
+            if (data.ok) {
+              showMsg('성공! ', false);
+              var a = document.createElement('a');
+              a.href = data.url;
+              a.target = '_blank';
+              a.textContent = '구글 시트 열기';
+              msg.appendChild(a);
+              msg.appendChild(document.createTextNode(' 에서 확인하세요.'));
+            } else {
+              showMsg(data.error || '내보내기 실패', true);
+            }
+          })
+          .catch(function(err) {
+            btnOk.disabled = false;
+            showMsg('요청 실패: ' + (err.message || err), true);
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
