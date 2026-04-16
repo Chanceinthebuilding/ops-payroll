@@ -157,6 +157,24 @@ def _build_dashboard_context(output_dir: Path):
     chart_labels = daily_cost["date_key"].tolist()
     chart_values = [round(float(v), 0) for v in daily_cost["daily_cost"].tolist()]
 
+    # 주간 트래킹(월요일 시작): 일자 합산(cost)을 week_start(월요일) 기준으로 재집계
+    daily["week_start"] = (daily["date"] - pd.to_timedelta(daily["date"].dt.weekday, unit="D")).dt.normalize()
+    daily["week_start_key"] = daily["week_start"].dt.strftime("%Y-%m-%d")
+    weekly_cost = (
+        daily.groupby("week_start_key", as_index=False)["daily_cost"]
+        .sum()
+        .sort_values("week_start_key")
+    )
+
+    def _fmt_week_label(week_start_key: str) -> str:
+        ws = pd.to_datetime(week_start_key)
+        we = ws + pd.Timedelta(days=6)
+        return f"{ws.month}/{ws.day}~{we.month}/{we.day}"
+
+    weekly_labels = [(_fmt_week_label(ws),) for ws in weekly_cost["week_start_key"].tolist()]
+    weekly_chart_labels = [x[0] for x in weekly_labels]
+    weekly_chart_values = [round(float(v), 0) for v in weekly_cost["daily_cost"].tolist()]
+
     total_pay_num = payroll["total_pay"].apply(_to_num) if "total_pay" in payroll.columns else pd.Series([0] * len(payroll))
     top_employees = (
         payroll.assign(total_pay_num=total_pay_num)
@@ -198,6 +216,8 @@ def _build_dashboard_context(output_dir: Path):
         "period_end": last_date,
         "chart_labels": chart_labels,
         "chart_values": chart_values,
+        "weekly_chart_labels": weekly_chart_labels,
+        "weekly_chart_values": weekly_chart_values,
         "top_employee_rows": top_employee_rows,
         "daily_rank_rows": daily_rank_rows,
     }

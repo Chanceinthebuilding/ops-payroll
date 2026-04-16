@@ -168,7 +168,24 @@
           </tbody>
         </table>
       </article>
-      <article class="muted-card">
+      <article class="card">
+        <h2>주간 인건비 추이 (월~일)</h2>
+        {% set mx = (weekly_chart_values|max) if weekly_chart_values else 1 %}
+        <div class="trend-list">
+          {% for i in range(weekly_chart_labels|length) %}
+          {% set v = weekly_chart_values[i] %}
+          <div class="trend-row">
+            <div class="trend-date">{{ weekly_chart_labels[i] }}</div>
+            <div class="bar-wrap"><div class="bar" style="width: {{ (v / mx * 100) if mx > 0 else 0 }}%"></div></div>
+            <div class="trend-val">{{ "{:,}".format(v|int) }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+
+    <section class="layout" style="margin-top: 14px;">
+      <article class="muted-card" style="grid-column: 1 / -1;">
         <p>이 대시보드는 공개된 `published` 결과를 기준으로 자동 집계됩니다.</p>
         <p>새 데이터를 반영하려면 관리자가 <a class="link" href="{{ url_for('admin') }}">급여 데이터 관리</a>에서 엑셀을 업로드하세요.</p>
       </article>
