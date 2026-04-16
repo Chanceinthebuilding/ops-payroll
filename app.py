@@ -61,12 +61,146 @@ def logout():
 
 @app.route("/dashboard")
 def dashboard():
-    return render_template("dashboard.html")
+    ctx = _build_dashboard_context(PUBLISHED_DIR)
+    return render_template("dashboard.html", **ctx)
 
 
 @app.route("/healthz")
 def healthz():
     return jsonify({"ok": True}), 200
+
+
+def _to_num(val, default=0.0):
+    try:
+        if val is None:
+            return default
+        if isinstance(val, str):
+            s = val.strip().replace(",", "")
+            if not s:
+                return default
+            return float(s)
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_read_csv(path):
+    import pandas as pd
+    p = Path(path)
+    if not p.exists() or p.stat().st_size == 0:
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(p, encoding="utf-8-sig")
+    except Exception:
+        return pd.DataFrame()
+
+
+def _build_dashboard_context(output_dir: Path):
+    import pandas as pd
+
+    daily = _safe_read_csv(output_dir / "daily_summary.csv")
+    payroll = _safe_read_csv(output_dir / "payroll_result.csv")
+    anomaly = _safe_read_csv(output_dir / "anomaly_report.csv")
+
+    if daily.empty or payroll.empty:
+        return {"dashboard_ready": False}
+
+    daily.columns = [str(c).strip().lstrip("\ufeff") for c in daily.columns]
+    payroll.columns = [str(c).strip().lstrip("\ufeff") for c in payroll.columns]
+    anomaly.columns = [str(c).strip().lstrip("\ufeff") for c in anomaly.columns] if not anomaly.empty else []
+
+    if "date" not in daily.columns:
+        return {"dashboard_ready": False}
+
+    daily["date"] = pd.to_datetime(daily["date"], errors="coerce")
+    daily = daily[daily["date"].notna()].copy()
+    if daily.empty:
+        return {"dashboard_ready": False}
+
+    holiday_dates = set()
+    try:
+        from leave_merger import get_weekday_public_holidays_kr
+        d_min = daily["date"].min().date()
+        d_max = daily["date"].max().date()
+        holiday_dates = get_weekday_public_holidays_kr(d_min, d_max)
+    except Exception:
+        pass
+
+    try:
+        from payroll_calculator import calc_daily
+        costs = daily.apply(lambda r: calc_daily(r, holiday_dates=holiday_dates), axis=1, result_type="expand")
+        daily["base_pay_calc"] = costs[0].astype(float)
+        daily["ot_pay_calc"] = costs[1].astype(float)
+    except Exception:
+        mins = daily.get("net_minutes", 0).fillna(0).astype(float)
+        base_min = mins.clip(upper=480)
+        ot_min = (mins - 480).clip(lower=0)
+        daily["base_pay_calc"] = base_min / 60 * _RECALC_HOURLY
+        daily["ot_pay_calc"] = ot_min / 60 * _RECALC_HOURLY * _RECALC_OT_MULT
+
+    daily["daily_cost"] = daily["base_pay_calc"] + daily["ot_pay_calc"]
+    daily["date_key"] = daily["date"].dt.strftime("%Y-%m-%d")
+    if "employee_name" not in daily.columns:
+        daily["employee_name"] = daily.get("employee_id", "").astype(str)
+
+    total_pay_series = payroll["total_pay"] if "total_pay" in payroll.columns else pd.Series(dtype=float)
+    total_pay = int(round(total_pay_series.apply(_to_num).sum()))
+    total_employees = int(payroll.get("employee_id", pd.Series(dtype=float)).nunique())
+    total_work_minutes = int(round(daily.get("net_minutes", pd.Series(dtype=float)).fillna(0).astype(float).sum()))
+    total_work_hours = round(total_work_minutes / 60, 1)
+
+    daily_cost = (
+        daily.groupby("date_key", as_index=False)["daily_cost"]
+        .sum()
+        .sort_values("date_key")
+    )
+    chart_labels = daily_cost["date_key"].tolist()
+    chart_values = [round(float(v), 0) for v in daily_cost["daily_cost"].tolist()]
+
+    total_pay_num = payroll["total_pay"].apply(_to_num) if "total_pay" in payroll.columns else pd.Series([0] * len(payroll))
+    top_employees = (
+        payroll.assign(total_pay_num=total_pay_num)
+        [["employee_name", "employee_id", "total_pay_num"]]
+        .sort_values("total_pay_num", ascending=False)
+        .head(10)
+    )
+    top_employee_rows = [
+        {
+            "employee_name": str(r["employee_name"]),
+            "employee_id": str(r["employee_id"]),
+            "total_pay": int(round(float(r["total_pay_num"]))),
+        }
+        for _, r in top_employees.iterrows()
+    ]
+
+    daily_rank = (
+        daily.groupby("employee_name", as_index=False)["daily_cost"]
+        .sum()
+        .sort_values("daily_cost", ascending=False)
+        .head(10)
+    )
+    daily_rank_rows = [
+        {"employee_name": str(r["employee_name"]), "cost": int(round(float(r["daily_cost"])))}
+        for _, r in daily_rank.iterrows()
+    ]
+
+    anomaly_count = int(len(anomaly)) if hasattr(anomaly, "__len__") else 0
+    first_date = daily_cost["date_key"].iloc[0] if len(daily_cost) else "-"
+    last_date = daily_cost["date_key"].iloc[-1] if len(daily_cost) else "-"
+
+    return {
+        "dashboard_ready": True,
+        "kpi_total_pay": total_pay,
+        "kpi_total_employees": total_employees,
+        "kpi_total_work_hours": total_work_hours,
+        "kpi_anomaly_count": anomaly_count,
+        "period_start": first_date,
+        "period_end": last_date,
+        "chart_labels": chart_labels,
+        "chart_values": chart_values,
+        "top_employee_rows": top_employee_rows,
+        "daily_rank_rows": daily_rank_rows,
+    }
 
 
 def _is_non_half_hour(val) -> bool:

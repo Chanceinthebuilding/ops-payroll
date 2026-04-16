@@ -6,18 +6,181 @@
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <title>인건비 대시보드</title>
   <style>
+    @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
     * { box-sizing: border-box; }
-    body { font-family: 'Malgun Gothic', sans-serif; max-width: 720px; margin: 0 auto; padding: 16px; line-height: 1.5; }
-    h1 { font-size: 1.35rem; margin: 8px 0 12px; }
-    .card { border: 1px solid #e0e0e0; border-radius: 12px; padding: 24px; background: #fafafa; color: #444; }
+    body {
+      margin: 0;
+      padding: 28px 16px 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #0f172a;
+      background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    }
+    .page { max-width: 1120px; margin: 0 auto; }
+    h1 { margin: 2px 0 4px; font-size: 1.95rem; font-weight: 700; letter-spacing: -0.02em; }
+    .sub { margin: 0 0 20px; color: #64748b; font-size: 0.92rem; }
+    .grid-kpi {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .kpi {
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      border-radius: 18px;
+      padding: 16px 14px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+      backdrop-filter: blur(10px);
+    }
+    .kpi .label { font-size: 0.8rem; color: #64748b; margin-bottom: 6px; }
+    .kpi .value { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; color: #0f172a; }
+    .layout {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 14px;
+      margin-top: 12px;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      border-radius: 20px;
+      padding: 18px 16px;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+    }
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .trend-list { display: grid; gap: 8px; }
+    .trend-row {
+      display: grid;
+      grid-template-columns: 96px 1fr 84px;
+      gap: 10px;
+      align-items: center;
+      font-size: 0.84rem;
+    }
+    .trend-date { color: #64748b; font-weight: 500; }
+    .bar-wrap {
+      height: 10px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar { height: 100%; background: linear-gradient(90deg, #6366f1 0%, #22c55e 100%); border-radius: 999px; }
+    .trend-val { text-align: right; color: #334155; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    th, td { padding: 8px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    th { color: #475569; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.01em; text-transform: uppercase; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .muted-card {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px dashed #cbd5e1;
+      border-radius: 20px;
+      padding: 22px 18px;
+      color: #475569;
+      line-height: 1.6;
+    }
+    a.link { color: #1d4ed8; font-weight: 700; text-decoration: none; }
+    a.link:hover { text-decoration: underline; }
+    @media (max-width: 980px) {
+      .grid-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .layout { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  {% include '_nav.html' %}
-  <h1>인건비 대시보드</h1>
-  <div class="card">
-    <p>여기에 주간·일간 인건비 요약, 자동화 파이프라인 결과를 연결할 예정입니다.</p>
-    <p style="margin-top:12px;"><a href="{{ url_for('index') }}">← 엑셀 업로드로 이동</a></p>
+  <div class="page">
+    {% include '_nav.html' %}
+    <h1>인건비 대시보드</h1>
+    {% if dashboard_ready %}
+    <p class="sub">공개 데이터 기준 집계 기간: <strong>{{ period_start }}</strong> ~ <strong>{{ period_end }}</strong></p>
+
+    <section class="grid-kpi">
+      <article class="kpi">
+        <div class="label">총 급여(합산금액)</div>
+        <div class="value">{{ "{:,}".format(kpi_total_pay) }}원</div>
+      </article>
+      <article class="kpi">
+        <div class="label">집계 직원 수</div>
+        <div class="value">{{ "{:,}".format(kpi_total_employees) }}명</div>
+      </article>
+      <article class="kpi">
+        <div class="label">총 근무시간</div>
+        <div class="value">{{ "{:,}".format(kpi_total_work_hours) }}h</div>
+      </article>
+      <article class="kpi">
+        <div class="label">이상치 건수</div>
+        <div class="value">{{ "{:,}".format(kpi_anomaly_count) }}건</div>
+      </article>
+    </section>
+
+    <section class="layout">
+      <article class="card">
+        <h2>일자별 인건비 추이</h2>
+        {% set mx = (chart_values|max) if chart_values else 1 %}
+        <div class="trend-list">
+          {% for i in range(chart_labels|length) %}
+          {% set v = chart_values[i] %}
+          <div class="trend-row">
+            <div class="trend-date">{{ chart_labels[i] }}</div>
+            <div class="bar-wrap"><div class="bar" style="width: {{ (v / mx * 100) if mx > 0 else 0 }}%"></div></div>
+            <div class="trend-val">{{ "{:,}".format(v|int) }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>직원별 급여 Top 10</h2>
+        <table>
+          <thead>
+            <tr><th>직원</th><th>사번</th><th class="num">합산금액</th></tr>
+          </thead>
+          <tbody>
+            {% for r in top_employee_rows %}
+            <tr>
+              <td>{{ r.employee_name }}</td>
+              <td>{{ r.employee_id }}</td>
+              <td class="num">{{ "{:,}".format(r.total_pay) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="layout" style="margin-top: 14px;">
+      <article class="card">
+        <h2>근태 기준 인건비 Top 10</h2>
+        <table>
+          <thead>
+            <tr><th>직원</th><th class="num">근태기반 인건비</th></tr>
+          </thead>
+          <tbody>
+            {% for r in daily_rank_rows %}
+            <tr>
+              <td>{{ r.employee_name }}</td>
+              <td class="num">{{ "{:,}".format(r.cost) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </article>
+      <article class="muted-card">
+        <p>이 대시보드는 공개된 `published` 결과를 기준으로 자동 집계됩니다.</p>
+        <p>새 데이터를 반영하려면 관리자가 <a class="link" href="{{ url_for('admin') }}">급여 데이터 관리</a>에서 엑셀을 업로드하세요.</p>
+      </article>
+    </section>
+    {% else %}
+    <section class="muted-card">
+      <p>아직 공개된 급여 데이터가 없어 대시보드를 만들 수 없습니다.</p>
+      {% if is_admin_user %}
+      <p>관리자는 <a class="link" href="{{ url_for('admin') }}">급여 데이터 관리</a>에서 데이터를 먼저 업로드해 주세요.</p>
+      {% endif %}
+    </section>
+    {% endif %}
   </div>
 </body>
 </html>
