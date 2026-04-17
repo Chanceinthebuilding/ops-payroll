@@ -32,6 +32,8 @@ PUBLISHED_FILES = ("daily_summary.csv", "payroll_result.csv", "anomaly_report.cs
 FM_ROSTER_FILENAME = "fm_roster.xlsx"
 FM_ROSTER_LOCAL_DIR = OUTPUT_BASE / "metadata"
 FM_ROSTER_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / FM_ROSTER_FILENAME
+FM_UPLOAD_META_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / "fm_upload_meta.json"
+PUBLISHED_META_FILENAME = "meta.json"
 KST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(ROOT))
 CONTRACT_CONFIG_PATH = ROOT / "contract_config.yaml"
@@ -208,6 +210,10 @@ def _fm_roster_blob_name() -> str:
     return f"metadata/{FM_ROSTER_FILENAME}"
 
 
+def _fm_upload_meta_blob_name() -> str:
+    return "metadata/fm_upload_meta.json"
+
+
 def _fm_roster_exists_remote_or_local() -> bool:
     if gcs_enabled():
         return _gcs_blob_exists(_fm_roster_blob_name())
@@ -249,28 +255,142 @@ def _attach_fm_roster_to_dir(target_dir: Path) -> bool:
     return False
 
 
+def _read_published_meta_dict() -> dict | None:
+    """로컬 published/meta.json 또는 GCS published/meta.json."""
+    p = PUBLISHED_DIR / PUBLISHED_META_FILENAME
+    if p.is_file():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    if gcs_enabled():
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tf:
+            tfp = Path(tf.name)
+        try:
+            if _gcs_download_file(_published_blob_name(PUBLISHED_META_FILENAME), tfp):
+                return json.loads(tfp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+        finally:
+            tfp.unlink(missing_ok=True)
+    return None
+
+
+def _write_published_meta_local(meta: dict) -> None:
+    PUBLISHED_DIR.mkdir(parents=True, exist_ok=True)
+    (PUBLISHED_DIR / PUBLISHED_META_FILENAME).write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _format_iso_kst_display(iso_str: str | None) -> str:
+    if not iso_str or not str(iso_str).strip():
+        return "—"
+    try:
+        s = str(iso_str).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=KST)
+        dt = dt.astimezone(KST)
+        return dt.strftime("%Y-%m-%d %H:%M (KST)")
+    except (ValueError, TypeError, OSError):
+        return str(iso_str)[:19]
+
+
+def _read_fm_upload_meta_dict() -> dict | None:
+    if FM_UPLOAD_META_LOCAL_PATH.is_file():
+        try:
+            return json.loads(FM_UPLOAD_META_LOCAL_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    if gcs_enabled():
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tf:
+            tfp = Path(tf.name)
+        try:
+            if _gcs_download_file(_fm_upload_meta_blob_name(), tfp):
+                return json.loads(tfp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+        finally:
+            tfp.unlink(missing_ok=True)
+    return None
+
+
+def _admin_upload_display_context() -> dict:
+    """관리자 업로드 화면: 마지막 파일명·시간 표시용."""
+    meta = _read_published_meta_dict()
+    att = {"filename": "—", "when": "—"}
+    leave = {"filename": "—", "when": "—"}
+    if meta:
+        an = meta.get("last_attendance_name") or meta.get("attendance_name")
+        at = meta.get("last_attendance_at") or meta.get("published_at")
+        if an:
+            att = {"filename": str(an), "when": _format_iso_kst_display(at)}
+        ln = (meta.get("last_leave_name") or "").strip()
+        la = (meta.get("last_leave_at") or "").strip()
+        if not ln and (meta.get("leave_name") or "").strip():
+            ln = (meta.get("leave_name") or "").strip()
+            la = meta.get("published_at") or ""
+        if ln:
+            leave = {"filename": ln, "when": _format_iso_kst_display(la or meta.get("published_at"))}
+    fm = _read_fm_upload_meta_dict()
+    fm_disp = {"filename": "—", "when": "—"}
+    if fm and fm.get("filename"):
+        fm_disp = {
+            "filename": str(fm["filename"]),
+            "when": _format_iso_kst_display(fm.get("uploaded_at")),
+        }
+    return {
+        "upload_last_attendance": att,
+        "upload_last_leave": leave,
+        "upload_last_fm": fm_disp,
+    }
+
+
 def _sync_run_to_gcs(run_dir: Path, input_path: Path, leave_path: Path | None = None, uploaded_by: str | None = None):
-    if not gcs_enabled():
-        return
     stamp = datetime.now(KST).strftime("%Y-%m-%d_%H%M%S")
     run_prefix = f"runs/{stamp}"
-    _gcs_upload_file(input_path, f"uploads/attendance/{stamp}{input_path.suffix}")
-    if leave_path and leave_path.exists():
-        _gcs_upload_file(leave_path, f"uploads/leave/{stamp}{leave_path.suffix}")
-    for name in PUBLISHED_FILES:
-        src = run_dir / name
-        if not src.exists():
-            continue
-        _gcs_upload_file(src, f"{run_prefix}/{name}", content_type="text/csv; charset=utf-8")
-        _gcs_upload_file(src, _published_blob_name(name), content_type="text/csv; charset=utf-8")
+    now_iso = datetime.now(KST).isoformat()
+    prev = _read_published_meta_dict()
     meta = {
-        "published_at": datetime.now(KST).isoformat(),
+        "published_at": now_iso,
         "uploaded_by": uploaded_by or "",
         "run_prefix": run_prefix,
         "attendance_name": input_path.name,
-        "leave_name": leave_path.name if leave_path else "",
+        "leave_name": leave_path.name if leave_path and leave_path.exists() else "",
+        "last_attendance_name": input_path.name,
+        "last_attendance_at": now_iso,
     }
-    _gcs_upload_text(json.dumps(meta, ensure_ascii=False, indent=2), _published_blob_name("meta.json"))
+    if leave_path and leave_path.exists():
+        meta["last_leave_name"] = leave_path.name
+        meta["last_leave_at"] = now_iso
+    elif prev:
+        meta["last_leave_name"] = prev.get("last_leave_name") or ""
+        meta["last_leave_at"] = prev.get("last_leave_at") or ""
+    else:
+        meta["last_leave_name"] = ""
+        meta["last_leave_at"] = ""
+
+    if gcs_enabled():
+        _gcs_upload_file(input_path, f"uploads/attendance/{stamp}{input_path.suffix}")
+        if leave_path and leave_path.exists():
+            _gcs_upload_file(leave_path, f"uploads/leave/{stamp}{leave_path.suffix}")
+        for name in PUBLISHED_FILES:
+            src = run_dir / name
+            if not src.exists():
+                continue
+            _gcs_upload_file(src, f"{run_prefix}/{name}", content_type="text/csv; charset=utf-8")
+            _gcs_upload_file(src, _published_blob_name(name), content_type="text/csv; charset=utf-8")
+        _gcs_upload_text(
+            json.dumps(meta, ensure_ascii=False, indent=2),
+            _published_blob_name(PUBLISHED_META_FILENAME),
+        )
+    _write_published_meta_local(meta)
 
 
 def _to_num(val, default=0.0):
@@ -777,7 +897,9 @@ def _make_payroll_result_response(
         back_label = "← 홈" if read_only else "← 관리자 데이터"
 
     def _err_template():
-        return render_template("public_home.html") if read_only else render_template("upload.html")
+        if read_only:
+            return render_template("public_home.html")
+        return render_template("upload.html", **_admin_upload_display_context())
 
     try:
         def safe_read_csv(path):
@@ -1159,6 +1281,20 @@ def admin_fm_roster():
                 "GCS 라이브러리를 불러오지 못해 원격에는 저장하지 못했습니다. 로컬에만 저장되었습니다.",
                 "warning",
             )
+        fm_meta = {
+            "filename": f.filename,
+            "uploaded_at": datetime.now(KST).isoformat(),
+            "uploaded_by": (session.get("user_email") or ""),
+        }
+        FM_UPLOAD_META_LOCAL_PATH.write_text(
+            json.dumps(fm_meta, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if gcs_enabled():
+            _gcs_upload_text(
+                json.dumps(fm_meta, ensure_ascii=False, indent=2),
+                _fm_upload_meta_blob_name(),
+            )
         flash(f"FM 기본정보를 반영했습니다. (고유 사번 {n}건, 대시보드 역할별 집계에 사용)", "success")
     except Exception as e:
         logger.exception("FM roster upload")
@@ -1173,16 +1309,16 @@ def admin_data():
         flash("관리자만 접근할 수 있습니다.", "error")
         return redirect(url_for("index"))
     if request.method == "GET":
-        return render_template("upload.html")
+        return render_template("upload.html", **_admin_upload_display_context())
 
     file = request.files.get("file")
     if not file or file.filename == "":
         flash("엑셀 파일을 선택해 주세요.", "error")
-        return render_template("upload.html")
+        return render_template("upload.html", **_admin_upload_display_context())
 
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         flash("엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.", "error")
-        return render_template("upload.html")
+        return render_template("upload.html", **_admin_upload_display_context())
 
     try:
         import pandas as pd
@@ -1194,13 +1330,13 @@ def admin_data():
 
             if input_path.stat().st_size == 0:
                 flash("업로드한 파일이 비어 있습니다. 시프티 출퇴근 엑셀(.xlsx)을 다시 내보내 주세요.", "error")
-                return render_template("upload.html")
+                return render_template("upload.html", **_admin_upload_display_context())
 
             try:
                 trial = pd.read_excel(input_path)
                 if trial.empty or len(trial) == 0:
                     flash("엑셀에 데이터 행이 없습니다. 시프티에서 올바른 기간으로 출퇴근 내역을 내보내 주세요.", "error")
-                    return render_template("upload.html")
+                    return render_template("upload.html", **_admin_upload_display_context())
                 required = ["사원번호", "직원", "날짜", "출근시간", "퇴근시간"]
                 missing = [c for c in required if c not in trial.columns]
                 if missing:
@@ -1208,10 +1344,10 @@ def admin_data():
                         f"엑셀에 필수 컬럼이 없습니다: {', '.join(missing)}. 시프티 출퇴근 형식인지 확인해 주세요. (현재 컬럼: {list(trial.columns)[:10]}…)",
                         "error",
                     )
-                    return render_template("upload.html")
+                    return render_template("upload.html", **_admin_upload_display_context())
             except Exception as e:
                 flash(f"엑셀 파일을 열 수 없습니다. ({e})", "error")
-                return render_template("upload.html")
+                return render_template("upload.html", **_admin_upload_display_context())
 
             run_dir = tmp / "published"
             if run_dir.exists():
@@ -1231,7 +1367,7 @@ def admin_data():
                 run_pipeline(input_path=input_path, output_dir=run_dir, leave_path=leave_path)
             except Exception as e:
                 flash(f"파이프라인 처리 중 오류: {e}", "error")
-                return render_template("upload.html")
+                return render_template("upload.html", **_admin_upload_display_context())
 
             if PUBLISHED_DIR.exists():
                 shutil.rmtree(PUBLISHED_DIR)
@@ -1253,7 +1389,7 @@ def admin_data():
             return redirect(url_for("payroll"))
     except Exception as e:
         flash(f"처리 중 오류: {e}", "error")
-        return render_template("upload.html")
+        return render_template("upload.html", **_admin_upload_display_context())
 
 
 @app.route("/export-google-sheet", methods=["GET", "POST"])

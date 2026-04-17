@@ -127,6 +127,13 @@
       border-color: #a7f3d0;
       background: #ecfdf5;
     }
+    .upload-meta-line {
+      font-size: 0.82rem;
+      color: #64748b;
+      margin: 2px 0 12px;
+      line-height: 1.5;
+    }
+    .upload-meta-line strong { color: #334155; font-weight: 600; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -146,6 +153,7 @@
 
       <form action="{{ url_for('admin_data') }}" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
         <p class="section-title">1. 출퇴근 엑셀 (필수)</p>
+        <p class="upload-meta-line">마지막 반영: <strong>{{ upload_last_attendance.filename }}</strong> · {{ upload_last_attendance.when }}</p>
         <label class="zone" id="dropzone" for="file">
           <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
           <p id="label">출퇴근 엑셀을 여기에 끌어다 놓거나 클릭해서 선택하세요</p>
@@ -153,6 +161,7 @@
         </label>
 
         <p class="section-title" style="margin-top: 20px;">2. 휴가 엑셀 (선택)</p>
+        <p class="upload-meta-line">마지막 반영(첨부한 경우): <strong>{{ upload_last_leave.filename }}</strong> · {{ upload_last_leave.when }}</p>
         <label class="zone" id="dropzone2" for="file_leave">
           <input type="file" name="file_leave" id="file_leave" accept=".xlsx,.xls">
           <p id="label2">휴가 엑셀을 여기에 넣으세요 (없으면 비워 두세요)</p>
@@ -168,10 +177,11 @@
       <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0 22px;">
 
       <h2 style="margin: 0 0 8px; font-size: 1.15rem; font-weight: 700; color: #0f172a;">FM 기본정보 (선택)</h2>
-      <p class="sub" style="margin-bottom: 16px;">
+      <p class="sub" style="margin-bottom: 8px;">
         대시보드에서 <strong>역할(팀)별 급여 집계</strong>에 씁니다. 시트 첫 행에 <code>사번</code>, <code>역할</code> 컬럼이 있어야 합니다.
         {% if fm_roster_on_disk %}<span style="color:#059669;font-weight:600;">현재 등록됨.</span>{% else %}아직 없음.{% endif %}
       </p>
+        <p class="upload-meta-line">마지막 반영: <strong>{{ upload_last_fm.filename }}</strong> · {{ upload_last_fm.when }}</p>
       <form action="{{ url_for('admin_fm_roster') }}" method="post" enctype="multipart/form-data" id="formFm">
         <label class="zone" id="dropzoneFm" for="file_fm" style="padding: 24px 18px;">
           <input type="file" name="file_fm" id="file_fm" accept=".xlsx,.xls" required>
