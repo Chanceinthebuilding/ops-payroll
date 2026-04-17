@@ -11,12 +11,20 @@
     body {
       font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
       margin: 0;
-      padding: 16px 12px 56px;
+      padding: 12px 10px 56px;
       line-height: 1.4;
       background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
       min-height: 100vh;
+      overflow-x: auto;
     }
-    .result-shell { max-width: min(1480px, 98vw); margin: 0 auto; }
+    /* 좌우 여백 최소화 — 급여 테이블이 모니터 폭을 최대한 씀 */
+    .result-shell {
+      max-width: none;
+      width: 100%;
+      margin: 0;
+      padding: 0 14px;
+      box-sizing: border-box;
+    }
     h1 { font-size: 1.5rem; margin-bottom: 8px; }
     .back { margin-bottom: 24px; }
     .back a { color: #06c; text-decoration: none; }
@@ -24,8 +32,28 @@
     section { margin-bottom: 40px; }
     section h2 { font-size: 1.2rem; margin-bottom: 12px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
     .table-wrap { overflow-x: auto; margin-top: 8px; }
-    .table-wrap-payroll { overflow: visible; }
-    .table-wrap-payroll .table-wrap-x { overflow-x: auto; overflow-y: visible; }
+    /* 급여 결과: 안쪽 가로 스크롤 제거 — 테이블이 문서 폭만큼 펼쳐짐(넘치면 브라우저 창 스크롤만) */
+    .table-wrap-payroll {
+      overflow-x: visible;
+      width: 100%;
+      margin-top: 8px;
+    }
+    .table-wrap-payroll .table-wrap-x {
+      overflow-x: visible;
+      overflow-y: visible;
+      display: block;
+      width: 100%;
+    }
+    .table-wrap-payroll table.table {
+      width: max-content;
+      min-width: 100%;
+      table-layout: auto;
+    }
+    .table-wrap-payroll table.table th,
+    .table-wrap-payroll table.table td {
+      padding: 5px 6px;
+      font-size: 0.82rem;
+    }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: auto; }
     th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: center; word-break: keep-all; white-space: nowrap; }
     th.th-two-line { white-space: pre-line; }
@@ -135,6 +163,31 @@
       background: #fff;
     }
     td.contract-select-cell .text-muted { font-size: 0.75rem; color: #999; }
+    .publish-save-bar {
+      position: fixed;
+      right: 16px;
+      bottom: 96px;
+      z-index: 45;
+      display: none;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      max-width: min(220px, 42vw);
+    }
+    .btn-publish-save {
+      background: linear-gradient(145deg, #0f766e 0%, #0d9488 100%);
+      color: #fff;
+      padding: 12px 18px;
+      border: none;
+      border-radius: 14px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 28px rgba(15, 118, 110, 0.38);
+    }
+    .btn-publish-save:hover { filter: brightness(1.06); }
+    .btn-publish-save:disabled { opacity: 0.65; cursor: wait; }
+    .publish-save-hint { font-size: 0.78rem; color: #475569; text-align: right; line-height: 1.35; }
   </style>
 </head>
 <body>
@@ -162,6 +215,13 @@
       </div>
       <p class="msg" id="exportMsg"></p>
     </div>
+  </div>
+  {% endif %}
+
+  {% if save_published_url %}
+  <div id="publishSaveBar" class="publish-save-bar" style="display:none;" role="region" aria-label="공개 급여 저장">
+    <button type="button" class="btn btn-publish-save" id="btnSavePublished">업로드 및 저장</button>
+    <span id="publishSaveHint" class="publish-save-hint"></span>
   </div>
   {% endif %}
 
@@ -292,6 +352,7 @@
 
   <script>
     (function() {
+        var savePublishedUrl = {{ save_published_url | tojson }};
         var payrollTable = document.querySelector('section table.table');
         if (payrollTable) {
           // 급여 재계산 상수 (서버 _recalc_pay_from_date_columns와 동일)
@@ -372,6 +433,7 @@
             setPay('overtime_pay', ot, true);
             setPay('overtime_hours', otHours, false);
             setPay('total_pay', total, true);
+            if (typeof updatePublishDirtyState === 'function') updatePublishDirtyState();
           }
           function recalcAllRows() {
             var tbody = payrollTable.querySelector('tbody');
@@ -535,6 +597,7 @@
                 count++;
               });
               recalcAllRows();
+              if (typeof updatePublishDirtyState === 'function') updatePublishDirtyState();
               if (autofillHint) {
                 if (count > 0) autofillHint.textContent = count + '개 셀 적용·합계 재계산 완료. Ctrl+Z로 실행 취소. ' + (useContract ? '계약 근무시간 반영.' : '');
                 else autofillHint.textContent = targetCol ? '선택한 일자(' + targetCol + ')에 해당하는 셀이 없습니다.' : '대상 일자 셀이 없습니다.';
@@ -546,6 +609,7 @@
                 if (autofillUndoStack.length > 0) {
                   e.preventDefault();
                   restoreSnapshot(autofillUndoStack.pop());
+                  if (typeof updatePublishDirtyState === 'function') updatePublishDirtyState();
                   if (autofillHint) autofillHint.textContent = '실행 취소했습니다.';
                 }
               }
@@ -688,6 +752,65 @@
           }
         });
         return { rows: rows };
+      }
+
+      var initialSaveSnapshot = null;
+      function updatePublishDirtyState() {
+        if (!savePublishedUrl || !initialSaveSnapshot) return;
+        var now = JSON.stringify(collectPayrollTableData());
+        var dirty = now !== initialSaveSnapshot;
+        var bar = document.getElementById('publishSaveBar');
+        if (bar) bar.style.display = dirty ? 'flex' : 'none';
+      }
+      if (savePublishedUrl && payrollTable) {
+        initialSaveSnapshot = JSON.stringify(collectPayrollTableData());
+        var tbodyPub = payrollTable.querySelector('tbody');
+        if (tbodyPub) {
+          tbodyPub.addEventListener('input', updatePublishDirtyState);
+          tbodyPub.addEventListener('blur', updatePublishDirtyState, true);
+          tbodyPub.addEventListener('change', updatePublishDirtyState);
+        }
+        var btnSavePub = document.getElementById('btnSavePublished');
+        var hintSavePub = document.getElementById('publishSaveHint');
+        if (btnSavePub) {
+          btnSavePub.addEventListener('click', function() {
+            var payload = collectPayrollTableData();
+            if (!payload || !payload.rows || !payload.rows.length) {
+              if (hintSavePub) hintSavePub.textContent = '저장할 행이 없습니다.';
+              return;
+            }
+            btnSavePub.disabled = true;
+            if (hintSavePub) hintSavePub.textContent = '저장 중…';
+            fetch(savePublishedUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify(payload)
+            })
+              .then(function(r) {
+                return r.text().then(function(text) {
+                  try {
+                    return { ok: r.ok, data: JSON.parse(text) };
+                  } catch (_) {
+                    throw new Error('서버 응답 오류');
+                  }
+                });
+              })
+              .then(function(res) {
+                btnSavePub.disabled = false;
+                if (res.data && res.data.ok) {
+                  if (hintSavePub) hintSavePub.textContent = '';
+                  window.location.reload();
+                } else {
+                  if (hintSavePub) hintSavePub.textContent = (res.data && res.data.error) ? res.data.error : '저장 실패';
+                }
+              })
+              .catch(function(err) {
+                btnSavePub.disabled = false;
+                if (hintSavePub) hintSavePub.textContent = err.message || '요청 실패';
+              });
+          });
+        }
       }
 
       var btn = document.getElementById('btnExportGoogle');

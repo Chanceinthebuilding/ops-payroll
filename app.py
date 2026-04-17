@@ -552,10 +552,114 @@ def resolve_export_output_dir():
     return None
 
 
+def _apply_browser_rows_to_payroll_csv(output_dir: Path, rows: list) -> tuple[bool, str | None]:
+    """브라우저 테이블 rows(JSON)로 payroll_result.csv를 재계산해 output_dir에 기록. (export·공개 저장 공통)"""
+    import pandas as pd
+
+    if not rows:
+        return False, "행 데이터가 없습니다."
+    try:
+        df = pd.DataFrame(rows)
+        if not {"employee_id", "employee_name"}.issubset(df.columns):
+            return False, "테이블 데이터에 employee_id/employee_name 컬럼이 없습니다."
+
+        def _to_number(v):
+            if v is None:
+                return None
+            if isinstance(v, (int, float)):
+                return v
+            if isinstance(v, str):
+                s = v.strip()
+                if not s:
+                    return None
+                s = s.replace(",", "")
+                try:
+                    return float(s)
+                except ValueError:
+                    return v
+            return v
+
+        for col in df.columns:
+            if col in ("employee_id", "employee_name", "_contract_override"):
+                continue
+            df[col] = df[col].map(_to_number)
+
+        contract_types = {}
+        employee_contracts = {}
+        if CONTRACT_CONFIG_PATH.exists():
+            try:
+                from attendance_normalizer import load_contract_config
+
+                contract_types, employee_contracts = load_contract_config()
+            except Exception:
+                pass
+        holiday_dates = set()
+        date_col_to_date = {}
+        try:
+            daily_path = output_dir / "daily_summary.csv"
+            if daily_path.exists():
+                daily = pd.read_csv(daily_path, encoding="utf-8-sig", nrows=1)
+                daily.columns = [str(c).strip().lstrip("\ufeff") for c in daily.columns]
+                if "date" in daily.columns:
+                    daily_full = pd.read_csv(daily_path, encoding="utf-8-sig")
+                    daily_full.columns = [str(c).strip().lstrip("\ufeff") for c in daily_full.columns]
+                    daily_full["date"] = pd.to_datetime(daily_full["date"]).dt.normalize()
+                    from payroll_calculator import _infer_payroll_period
+
+                    payroll_start, payroll_end = _infer_payroll_period(daily_full)
+                    from leave_merger import get_weekday_public_holidays_kr
+
+                    holiday_dates = get_weekday_public_holidays_kr(payroll_start, payroll_end)
+                    pay_cols_set = {
+                        "base_pay",
+                        "overtime_pay",
+                        "overtime_hours",
+                        "weekly_allowance_pay",
+                        "weekly_allowance_hours",
+                        "unpaid_hours",
+                        "total_pay",
+                    }
+                    for c in df.columns:
+                        if (
+                            c in ("employee_id", "employee_name", "_contract_override")
+                            or c in pay_cols_set
+                            or str(c).strip().startswith("주휴")
+                            or "주휴용" in str(c)
+                        ):
+                            continue
+                        part = str(c).split("\n")[0].strip()
+                        if "/" in part:
+                            try:
+                                m, d = map(int, part.split("/", 1))
+                                year = payroll_start.year if m >= payroll_start.month else payroll_start.year - 1
+                                from datetime import date as date_cls
+
+                                date_col_to_date[c] = date_cls(year, m, d)
+                            except (ValueError, TypeError):
+                                pass
+        except Exception:
+            pass
+        _recalc_pay_from_date_columns(
+            df,
+            contract_types=contract_types,
+            employee_contracts=employee_contracts,
+            holiday_dates=holiday_dates,
+            date_col_to_date=date_col_to_date,
+        )
+
+        df_export = df.drop(columns=["_contract_override"], errors="ignore")
+        csv_path = output_dir / "payroll_result.csv"
+        df_export.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    except Exception as e:
+        return False, f"급여 데이터를 반영하지 못했습니다: {e}"
+    return True, None
+
+
 def _make_payroll_result_response(
     output_dir: Path,
     *,
     read_only: bool = False,
+    allow_published_edit: bool = False,
     back_href: str | None = None,
     back_label: str | None = None,
 ):
@@ -799,10 +903,14 @@ def _make_payroll_result_response(
             flash(f"결과 테이블 생성 중 오류: {e}", "error")
             return _err_template()
 
-        can_edit = (not read_only) and is_current_user_admin()
+        can_edit = is_current_user_admin() and ((not read_only) or allow_published_edit)
+        save_published_url = (
+            url_for("save_published_payroll") if allow_published_edit and is_current_user_admin() else None
+        )
         html = render_template(
             "result.html",
             export_url=url_for("export_google_sheet"),
+            save_published_url=save_published_url,
             daily=daily_html,
             use_payroll_table=use_payroll_table,
             payroll_rows=payroll_rows,
@@ -853,7 +961,59 @@ def payroll():
         tmp_dir = Path(tmp)
         if not _download_published_to_dir(tmp_dir):
             return redirect(url_for("index"))
-        return _make_payroll_result_response(tmp_dir, read_only=True)
+        return _make_payroll_result_response(tmp_dir, read_only=True, allow_published_edit=True)
+
+
+@app.route("/payroll/save", methods=["POST"])
+def save_published_payroll():
+    """관리자가 급여 테이블을 수정한 뒤 공개본(published)으로 저장 — GCS·로컬 output/published 갱신."""
+    if not is_current_user_admin():
+        return jsonify({"ok": False, "error": "관리자만 저장할 수 있습니다."}), 403
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows")
+    if not rows:
+        return jsonify({"ok": False, "error": "저장할 테이블 데이터(rows)가 없습니다."}), 400
+    if not _published_exists():
+        return jsonify({"ok": False, "error": "공개 급여 데이터가 없습니다."}), 400
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        if not _download_published_to_dir(tmp_dir):
+            return jsonify({"ok": False, "error": "기존 공개 데이터를 불러오지 못했습니다."}), 500
+        ok, err = _apply_browser_rows_to_payroll_csv(tmp_dir, rows)
+        if not ok:
+            return jsonify({"ok": False, "error": err or "저장 실패"}), 400
+
+        PUBLISHED_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(tmp_dir / "payroll_result.csv", PUBLISHED_DIR / "payroll_result.csv")
+
+        if gcs_enabled():
+            try:
+                _gcs_upload_file(
+                    tmp_dir / "payroll_result.csv",
+                    _published_blob_name("payroll_result.csv"),
+                    content_type="text/csv; charset=utf-8",
+                )
+                meta = {
+                    "published_at": datetime.now(KST).isoformat(),
+                    "source": "payroll_table_save",
+                    "saved_by": (session.get("user_email") or ""),
+                }
+                _gcs_upload_text(
+                    json.dumps(meta, ensure_ascii=False, indent=2),
+                    _published_blob_name("meta.json"),
+                )
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"GCS 업로드 실패: {e}"}), 500
+        elif _gcs_env_configured() and not gcs_enabled():
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "GCS 라이브러리를 불러오지 못해 원격 저장에 실패했습니다. 환경을 확인하세요.",
+                }
+            ), 500
+
+    return jsonify({"ok": True, "message": "공개 급여 데이터가 저장되었습니다."})
 
 
 @app.route("/admin/data", methods=["GET", "POST"])
@@ -974,79 +1134,9 @@ def export_google_sheet():
         data = request.get_json(silent=True) or {}
         rows = data.get("rows")
         if rows:
-            try:
-                import pandas as pd
-
-                df = pd.DataFrame(rows)
-                if not {"employee_id", "employee_name"}.issubset(df.columns):
-                    return jsonify({"ok": False, "error": "테이블 데이터에 employee_id/employee_name 컬럼이 없습니다."}), 400
-
-                def _to_number(v):
-                    if v is None:
-                        return None
-                    if isinstance(v, (int, float)):
-                        return v
-                    if isinstance(v, str):
-                        s = v.strip()
-                        if not s:
-                            return None
-                        s = s.replace(",", "")
-                        try:
-                            return float(s)
-                        except ValueError:
-                            return v
-                    return v
-
-                for col in df.columns:
-                    if col in ("employee_id", "employee_name", "_contract_override"):
-                        continue
-                    df[col] = df[col].map(_to_number)
-
-                contract_types = {}
-                employee_contracts = {}
-                if CONTRACT_CONFIG_PATH.exists():
-                    try:
-                        from attendance_normalizer import load_contract_config
-                        contract_types, employee_contracts = load_contract_config()
-                    except Exception:
-                        pass
-                holiday_dates = set()
-                date_col_to_date = {}
-                try:
-                    daily_path = output_dir / "daily_summary.csv"
-                    if daily_path.exists():
-                        daily = pd.read_csv(daily_path, encoding="utf-8-sig", nrows=1)
-                        daily.columns = [str(c).strip().lstrip("\ufeff") for c in daily.columns]
-                        if "date" in daily.columns:
-                            daily_full = pd.read_csv(daily_path, encoding="utf-8-sig")
-                            daily_full.columns = [str(c).strip().lstrip("\ufeff") for c in daily_full.columns]
-                            daily_full["date"] = pd.to_datetime(daily_full["date"]).dt.normalize()
-                            from payroll_calculator import _infer_payroll_period
-                            payroll_start, payroll_end = _infer_payroll_period(daily_full)
-                            from leave_merger import get_weekday_public_holidays_kr
-                            holiday_dates = get_weekday_public_holidays_kr(payroll_start, payroll_end)
-                            pay_cols_set = {"base_pay", "overtime_pay", "overtime_hours", "weekly_allowance_pay", "weekly_allowance_hours", "unpaid_hours", "total_pay"}
-                            for c in df.columns:
-                                if c in ("employee_id", "employee_name", "_contract_override") or c in pay_cols_set or str(c).strip().startswith("주휴") or "주휴용" in str(c):
-                                    continue
-                                part = str(c).split("\n")[0].strip()
-                                if "/" in part:
-                                    try:
-                                        m, d = map(int, part.split("/", 1))
-                                        year = payroll_start.year if m >= payroll_start.month else payroll_start.year - 1
-                                        from datetime import date as date_cls
-                                        date_col_to_date[c] = date_cls(year, m, d)
-                                    except (ValueError, TypeError):
-                                        pass
-                except Exception:
-                    pass
-                _recalc_pay_from_date_columns(df, contract_types=contract_types, employee_contracts=employee_contracts, holiday_dates=holiday_dates, date_col_to_date=date_col_to_date)
-
-                df_export = df.drop(columns=["_contract_override"], errors="ignore")
-                csv_path = output_dir / "payroll_result.csv"
-                df_export.to_csv(csv_path, index=False, encoding="utf-8-sig")
-            except Exception as e:
-                return jsonify({"ok": False, "error": f"수정된 테이블 데이터를 저장하지 못했습니다: {e}"}), 400
+            ok, err = _apply_browser_rows_to_payroll_csv(output_dir, rows)
+            if not ok:
+                return jsonify({"ok": False, "error": err or "수정된 테이블을 반영하지 못했습니다."}), 400
 
         try:
             from google_sheet_exporter import create_google_sheet
