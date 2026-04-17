@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <title>급여 데이터 없음</title>
+  <title>NYJ payroll data center</title>
   <style>
     @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
     * { box-sizing: border-box; }
@@ -20,7 +20,7 @@
         radial-gradient(circle at 86% 0%, rgba(16, 185, 129, 0.10), transparent 40%),
         linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
     }
-    .page { max-width: 760px; margin: 0 auto; }
+    .page { max-width: min(1320px, 96vw); margin: 0 auto; }
     .hero-card {
       border: 1px solid rgba(255, 255, 255, 0.8);
       border-radius: 26px;
@@ -75,14 +75,15 @@
 
       <h1>공개된 급여 데이터가 없습니다</h1>
       {% if is_admin_user %}
-      <p>관리자는 <a href="{{ url_for('admin') }}">급여 데이터 관리</a>에서 시프티 출퇴근 엑셀을 업로드하면, 모든 사용자에게 동일한 결과가 표시됩니다.</p>
+      <p>관리자는 화면 <strong>우하단 + 버튼</strong> 또는 <a href="{{ url_for('admin_data') }}">관리자 데이터</a> 페이지에서 시프티 출퇴근 엑셀을 업로드하면, 모든 사용자에게 동일한 결과가 표시됩니다.</p>
       {% else %}
       <p>아직 등록된 급여 결과가 없습니다. 관리자에게 문의해 주세요.</p>
       {% endif %}
       {% if not auth_enabled %}
-      <p class="mini"><a href="{{ url_for('admin') }}">급여 데이터 관리</a> (로컬 · AUTH_DISABLED)</p>
+      <p class="mini"><a href="{{ url_for('admin_data') }}">관리자 데이터</a> (로컬 · AUTH_DISABLED)</p>
       {% endif %}
     </section>
   </div>
+  {% include '_fab_admin.html' %}
 </body>
 </html>

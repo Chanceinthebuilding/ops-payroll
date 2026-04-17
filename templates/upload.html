@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <title>HR 급여 검증 – 엑셀 업로드</title>
+  <title>관리자 데이터 — NYJ payroll data center</title>
   <style>
     @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
     * { box-sizing: border-box; }
@@ -21,7 +21,7 @@
         linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
     }
     .page {
-      max-width: 760px;
+      max-width: min(1320px, 96vw);
       margin: 0 auto;
     }
     .hero-card {
@@ -133,7 +133,7 @@
   <div class="page">
     {% include '_nav.html' %}
     <section class="hero-card">
-      <h1>급여 데이터 관리</h1>
+      <h1>관리자 데이터</h1>
       <p class="sub">관리자 전용입니다. 출퇴근 엑셀(필수)과 휴가 엑셀(선택)을 올리면 <strong>모든 사용자에게 공개되는</strong> 급여·일별 근무 결과가 갱신됩니다.</p>
 
       {% with messages = get_flashed_messages(with_categories=true) %}
@@ -144,7 +144,7 @@
         {% endif %}
       {% endwith %}
 
-      <form action="{{ url_for('admin') }}" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
+      <form action="{{ url_for('admin_data') }}" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
         <p class="section-title">1. 출퇴근 엑셀 (필수)</p>
         <label class="zone" id="dropzone" for="file">
           <input type="file" name="file" id="file" accept=".xlsx,.xls" required>

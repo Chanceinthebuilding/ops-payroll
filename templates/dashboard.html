@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <title>인건비 대시보드</title>
+  <title>인건비 대시보드 — NYJ payroll data center</title>
   <style>
     @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
     * { box-sizing: border-box; }
@@ -15,7 +15,7 @@
       color: #0f172a;
       background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
     }
-    .page { max-width: 1120px; margin: 0 auto; }
+    .page { max-width: min(1320px, 96vw); margin: 0 auto; }
     h1 { margin: 2px 0 4px; font-size: 1.95rem; font-weight: 700; letter-spacing: -0.02em; }
     .sub { margin: 0 0 20px; color: #64748b; font-size: 0.92rem; }
     .grid-kpi {
@@ -187,17 +187,18 @@
     <section class="layout" style="margin-top: 14px;">
       <article class="muted-card" style="grid-column: 1 / -1;">
         <p>이 대시보드는 공개된 `published` 결과를 기준으로 자동 집계됩니다.</p>
-        <p>새 데이터를 반영하려면 관리자가 <a class="link" href="{{ url_for('admin') }}">급여 데이터 관리</a>에서 엑셀을 업로드하세요.</p>
+        <p>새 데이터를 반영하려면 관리자가 <a class="link" href="{{ url_for('admin_data') }}">관리자 데이터</a> 페이지에서 엑셀을 업로드하세요.</p>
       </article>
     </section>
     {% else %}
     <section class="muted-card">
       <p>아직 공개된 급여 데이터가 없어 대시보드를 만들 수 없습니다.</p>
       {% if is_admin_user %}
-      <p>관리자는 <a class="link" href="{{ url_for('admin') }}">급여 데이터 관리</a>에서 데이터를 먼저 업로드해 주세요.</p>
+      <p>관리자는 <a class="link" href="{{ url_for('admin_data') }}">관리자 데이터</a>에서 먼저 업로드해 주세요.</p>
       {% endif %}
     </section>
     {% endif %}
   </div>
+  {% include '_fab_admin.html' %}
 </body>
 </html>

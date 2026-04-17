@@ -562,9 +562,9 @@ def _make_payroll_result_response(
     import pandas as pd
 
     if back_href is None:
-        back_href = url_for("index")
+        back_href = url_for("index") if read_only else url_for("admin_data")
     if back_label is None:
-        back_label = "← 홈" if read_only else "← 급여 데이터 관리"
+        back_label = "← 홈" if read_only else "← 관리자 데이터"
 
     def _err_template():
         return render_template("public_home.html") if read_only else render_template("upload.html")
@@ -841,15 +841,24 @@ def inject_nav():
 def index():
     if not _published_exists():
         return render_template("public_home.html")
+    return redirect(url_for("payroll"))
+
+
+@app.route("/payroll", methods=["GET"])
+def payroll():
+    """공개 payroll_result 테이블(모든 로그인 사용자)."""
+    if not _published_exists():
+        return redirect(url_for("index"))
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         if not _download_published_to_dir(tmp_dir):
-            return render_template("public_home.html")
+            return redirect(url_for("index"))
         return _make_payroll_result_response(tmp_dir, read_only=True)
 
 
+@app.route("/admin/data", methods=["GET", "POST"])
 @app.route("/admin", methods=["GET", "POST"])
-def admin():
+def admin_data():
     if not is_current_user_admin():
         flash("관리자만 접근할 수 있습니다.", "error")
         return redirect(url_for("index"))
@@ -931,7 +940,7 @@ def admin():
                 )
             session["last_run_id"] = PUBLISHED_ID
             flash("공개 급여 데이터가 갱신되었습니다.", "success")
-            return redirect(url_for("index"))
+            return redirect(url_for("payroll"))
     except Exception as e:
         flash(f"처리 중 오류: {e}", "error")
         return render_template("upload.html")

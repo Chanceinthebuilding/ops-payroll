@@ -4,11 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <title>급여·근무 결과</title>
+  <title>급여 데이터 — NYJ payroll data center</title>
   <style>
+    @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
     * { box-sizing: border-box; }
-    /* 뷰 테이블 가로 폭: max-width를 늘리면 가로 스크롤이 줄어듦 (예: 3600px, 98vw) */
-    body { font-family: 'Malgun Gothic', sans-serif; max-width: 3600px; margin: 0 auto; padding: 16px 12px; line-height: 1.4; }
+    body {
+      font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+      margin: 0;
+      padding: 16px 12px 56px;
+      line-height: 1.4;
+      background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+      min-height: 100vh;
+    }
+    .result-shell { max-width: min(1480px, 98vw); margin: 0 auto; }
     h1 { font-size: 1.5rem; margin-bottom: 8px; }
     .back { margin-bottom: 24px; }
     .back a { color: #06c; text-decoration: none; }
@@ -131,6 +139,7 @@
 </head>
 <body>
   {% include '_nav.html' %}
+  <div class="result-shell">
   {% set _ro = result_read_only | default(false) %}
   {% set _editable = table_editable | default(true) %}
   {% set _back_href = result_back_href | default('/', true) %}
@@ -751,5 +760,7 @@
       }
     })();
   </script>
+  </div>
+  {% include '_fab_admin.html' %}
 </body>
 </html>
