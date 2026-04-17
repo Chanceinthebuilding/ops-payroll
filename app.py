@@ -2,12 +2,13 @@
 Flask 웹 앱: 시프티 엑셀 업로드 → 실시간 급여·근무 결과 확인
 실행: flask --app app run (또는 python app.py)
 """
+import json
 import os
 import shutil
 import sys
 import tempfile
 import yaml
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -18,6 +19,7 @@ except ImportError:
     pass
 
 from flask import Flask, make_response, redirect, render_template, request, flash, session, jsonify, url_for
+from google.cloud import storage
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth_google import auth_disabled, register_google_auth
@@ -26,6 +28,8 @@ ROOT = Path(__file__).resolve().parent
 OUTPUT_BASE = ROOT / "output"
 PUBLISHED_ID = "published"
 PUBLISHED_DIR = OUTPUT_BASE / PUBLISHED_ID
+PUBLISHED_FILES = ("daily_summary.csv", "payroll_result.csv", "anomaly_report.csv")
+KST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(ROOT))
 CONTRACT_CONFIG_PATH = ROOT / "contract_config.yaml"
 
@@ -40,6 +44,7 @@ if os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in ("1", "true", 
     app.config["SESSION_COOKIE_SECURE"] = True
 
 register_google_auth(app)
+_gcs_client = None
 
 
 @app.route("/login")
@@ -61,13 +66,144 @@ def logout():
 
 @app.route("/dashboard")
 def dashboard():
-    ctx = _build_dashboard_context(PUBLISHED_DIR)
-    return render_template("dashboard.html", **ctx)
+    if not _published_exists():
+        return render_template("dashboard.html", dashboard_ready=False)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        if not _download_published_to_dir(tmp_dir):
+            return render_template("dashboard.html", dashboard_ready=False)
+        ctx = _build_dashboard_context(tmp_dir)
+        return render_template("dashboard.html", **ctx)
 
 
 @app.route("/healthz")
 def healthz():
     return jsonify({"ok": True}), 200
+
+
+def _gcs_bucket_name() -> str:
+    return os.environ.get("GCS_BUCKET", "").strip()
+
+
+def _gcs_project_id() -> str:
+    return os.environ.get("GCP_PROJECT_ID", "").strip()
+
+
+def _gcs_credentials_info():
+    raw = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def gcs_enabled() -> bool:
+    return bool(_gcs_bucket_name() and _gcs_project_id() and _gcs_credentials_info())
+
+
+def _get_gcs_client():
+    global _gcs_client
+    if _gcs_client is not None:
+        return _gcs_client
+    creds = _gcs_credentials_info()
+    if not creds:
+        return None
+    _gcs_client = storage.Client.from_service_account_info(creds, project=_gcs_project_id() or None)
+    return _gcs_client
+
+
+def _gcs_bucket():
+    client = _get_gcs_client()
+    if not client or not _gcs_bucket_name():
+        return None
+    return client.bucket(_gcs_bucket_name())
+
+
+def _gcs_blob_exists(blob_name: str) -> bool:
+    bucket = _gcs_bucket()
+    if not bucket:
+        return False
+    return bucket.blob(blob_name).exists()
+
+
+def _gcs_upload_file(local_path: Path, blob_name: str, content_type: str | None = None):
+    bucket = _gcs_bucket()
+    if not bucket:
+        raise RuntimeError("GCS가 설정되지 않았습니다.")
+    blob = bucket.blob(blob_name)
+    blob.upload_from_filename(str(local_path), content_type=content_type)
+
+
+def _gcs_upload_text(text: str, blob_name: str, content_type: str = "application/json; charset=utf-8"):
+    bucket = _gcs_bucket()
+    if not bucket:
+        raise RuntimeError("GCS가 설정되지 않았습니다.")
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(text, content_type=content_type)
+
+
+def _gcs_download_file(blob_name: str, local_path: Path) -> bool:
+    bucket = _gcs_bucket()
+    if not bucket:
+        return False
+    blob = bucket.blob(blob_name)
+    if not blob.exists():
+        return False
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    blob.download_to_filename(str(local_path))
+    return True
+
+
+def _published_blob_name(filename: str) -> str:
+    return f"published/{filename}"
+
+
+def _published_exists() -> bool:
+    if gcs_enabled():
+        return _gcs_blob_exists(_published_blob_name("payroll_result.csv"))
+    return (PUBLISHED_DIR / "payroll_result.csv").exists()
+
+
+def _download_published_to_dir(target_dir: Path) -> bool:
+    if gcs_enabled():
+        ok = False
+        for name in PUBLISHED_FILES:
+            ok = _gcs_download_file(_published_blob_name(name), target_dir / name) or ok
+        return ok and (target_dir / "payroll_result.csv").exists()
+    if not PUBLISHED_DIR.exists():
+        return False
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name in PUBLISHED_FILES:
+        src = PUBLISHED_DIR / name
+        if src.exists():
+            shutil.copy2(src, target_dir / name)
+    return (target_dir / "payroll_result.csv").exists()
+
+
+def _sync_run_to_gcs(run_dir: Path, input_path: Path, leave_path: Path | None = None, uploaded_by: str | None = None):
+    if not gcs_enabled():
+        return
+    stamp = datetime.now(KST).strftime("%Y-%m-%d_%H%M%S")
+    run_prefix = f"runs/{stamp}"
+    _gcs_upload_file(input_path, f"uploads/attendance/{stamp}{input_path.suffix}")
+    if leave_path and leave_path.exists():
+        _gcs_upload_file(leave_path, f"uploads/leave/{stamp}{leave_path.suffix}")
+    for name in PUBLISHED_FILES:
+        src = run_dir / name
+        if not src.exists():
+            continue
+        _gcs_upload_file(src, f"{run_prefix}/{name}", content_type="text/csv; charset=utf-8")
+        _gcs_upload_file(src, _published_blob_name(name), content_type="text/csv; charset=utf-8")
+    meta = {
+        "published_at": datetime.now(KST).isoformat(),
+        "uploaded_by": uploaded_by or "",
+        "run_prefix": run_prefix,
+        "attendance_name": input_path.name,
+        "leave_name": leave_path.name if leave_path else "",
+    }
+    _gcs_upload_text(json.dumps(meta, ensure_ascii=False, indent=2), _published_blob_name("meta.json"))
 
 
 def _to_num(val, default=0.0):
@@ -367,11 +503,11 @@ def is_current_user_admin():
 
 def resolve_export_output_dir():
     rid = session.get("last_run_id")
-    if rid:
+    if rid and rid != PUBLISHED_ID:
         p = OUTPUT_BASE / str(rid)
         if p.is_dir() and (p / "payroll_result.csv").exists():
             return p
-    if PUBLISHED_DIR.is_dir() and (PUBLISHED_DIR / "payroll_result.csv").exists():
+    if _published_exists():
         return PUBLISHED_DIR
     return None
 
@@ -663,10 +799,13 @@ def inject_nav():
 
 @app.route("/", methods=["GET"])
 def index():
-    payroll_csv = PUBLISHED_DIR / "payroll_result.csv"
-    if not payroll_csv.exists():
+    if not _published_exists():
         return render_template("public_home.html")
-    return _make_payroll_result_response(PUBLISHED_DIR, read_only=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        if not _download_published_to_dir(tmp_dir):
+            return render_template("public_home.html")
+        return _make_payroll_result_response(tmp_dir, read_only=True)
 
 
 @app.route("/admin", methods=["GET", "POST"])
@@ -715,9 +854,10 @@ def admin():
                 flash(f"엑셀 파일을 열 수 없습니다. ({e})", "error")
                 return render_template("upload.html")
 
-            if PUBLISHED_DIR.exists():
-                shutil.rmtree(PUBLISHED_DIR)
-            PUBLISHED_DIR.mkdir(parents=True, exist_ok=True)
+            run_dir = tmp / "published"
+            if run_dir.exists():
+                shutil.rmtree(run_dir)
+            run_dir.mkdir(parents=True, exist_ok=True)
 
             leave_path = None
             file_leave = request.files.get("file_leave")
@@ -729,11 +869,20 @@ def admin():
             try:
                 from run_all import run_pipeline
 
-                run_pipeline(input_path=input_path, output_dir=PUBLISHED_DIR, leave_path=leave_path)
+                run_pipeline(input_path=input_path, output_dir=run_dir, leave_path=leave_path)
             except Exception as e:
                 flash(f"파이프라인 처리 중 오류: {e}", "error")
                 return render_template("upload.html")
 
+            if PUBLISHED_DIR.exists():
+                shutil.rmtree(PUBLISHED_DIR)
+            shutil.copytree(run_dir, PUBLISHED_DIR)
+            _sync_run_to_gcs(
+                run_dir,
+                input_path=input_path,
+                leave_path=leave_path,
+                uploaded_by=(session.get("user_email") or ""),
+            )
             session["last_run_id"] = PUBLISHED_ID
             flash("공개 급여 데이터가 갱신되었습니다.", "success")
             return redirect(url_for("index"))
@@ -751,104 +900,109 @@ def export_google_sheet():
     if not is_current_user_admin():
         return jsonify({"ok": False, "error": "관리자만 구글 시트로 내보낼 수 있습니다."}), 403
 
-    output_dir = resolve_export_output_dir()
-    if not output_dir:
+    resolved = resolve_export_output_dir()
+    if not resolved:
         return jsonify({"ok": False, "error": "내보낼 결과가 없습니다. 관리자가 먼저 급여 데이터를 등록해 주세요."}), 400
+    with tempfile.TemporaryDirectory() as tmp:
+        output_dir = Path(tmp)
+        if resolved == PUBLISHED_DIR and gcs_enabled():
+            if not _download_published_to_dir(output_dir):
+                return jsonify({"ok": False, "error": "공개 결과를 GCS에서 불러오지 못했습니다."}), 404
+        else:
+            for name in PUBLISHED_FILES:
+                src = resolved / name
+                if src.exists():
+                    shutil.copy2(src, output_dir / name)
 
-    # 브라우저에서 수정한 급여 테이블이 JSON(rows)로 넘어온 경우,
-    # 기존 payroll_result.csv를 이 데이터로 덮어쓴 뒤 그 파일을 기준으로 구글 시트를 생성한다.
-    data = request.get_json(silent=True) or {}
-    rows = data.get("rows")
-    if rows:
-        try:
-            import pandas as pd
+        # 브라우저에서 수정한 급여 테이블이 JSON(rows)로 넘어온 경우,
+        # 기존 payroll_result.csv를 이 데이터로 덮어쓴 뒤 그 파일을 기준으로 구글 시트를 생성한다.
+        data = request.get_json(silent=True) or {}
+        rows = data.get("rows")
+        if rows:
+            try:
+                import pandas as pd
 
-            df = pd.DataFrame(rows)
-            # 최소한 employee_id, employee_name은 존재해야 함
-            if not {"employee_id", "employee_name"}.issubset(df.columns):
-                return jsonify({"ok": False, "error": "테이블 데이터에 employee_id/employee_name 컬럼이 없습니다."}), 400
+                df = pd.DataFrame(rows)
+                if not {"employee_id", "employee_name"}.issubset(df.columns):
+                    return jsonify({"ok": False, "error": "테이블 데이터에 employee_id/employee_name 컬럼이 없습니다."}), 400
 
-            def _to_number(v):
-                if v is None:
-                    return None
-                if isinstance(v, (int, float)):
-                    return v
-                if isinstance(v, str):
-                    s = v.strip()
-                    if not s:
+                def _to_number(v):
+                    if v is None:
                         return None
-                    # 화면에서 편의상 천단위 콤마가 들어간 숫자도 처리
-                    s = s.replace(",", "")
-                    try:
-                        return float(s)
-                    except ValueError:
+                    if isinstance(v, (int, float)):
                         return v
-                return v
+                    if isinstance(v, str):
+                        s = v.strip()
+                        if not s:
+                            return None
+                        s = s.replace(",", "")
+                        try:
+                            return float(s)
+                        except ValueError:
+                            return v
+                    return v
 
-            # 사번/이름을 제외한 컬럼은 숫자 변환을 시도 (실패 시 원본 문자열 유지)
-            for col in df.columns:
-                if col in ("employee_id", "employee_name", "_contract_override"):
-                    continue
-                df[col] = df[col].map(_to_number)
+                for col in df.columns:
+                    if col in ("employee_id", "employee_name", "_contract_override"):
+                        continue
+                    df[col] = df[col].map(_to_number)
 
-            # 일자 컬럼 기준으로 기본급·야근·합계 재계산 (사번없음 계약 선택 반영)
-            # 프리랜서 명절(공휴일) 근무는 야근수당으로 반영하기 위해 payroll 기간·공휴일·컬럼→날짜 매핑 구함
-            contract_types = {}
-            employee_contracts = {}
-            if CONTRACT_CONFIG_PATH.exists():
+                contract_types = {}
+                employee_contracts = {}
+                if CONTRACT_CONFIG_PATH.exists():
+                    try:
+                        from attendance_normalizer import load_contract_config
+                        contract_types, employee_contracts = load_contract_config()
+                    except Exception:
+                        pass
+                holiday_dates = set()
+                date_col_to_date = {}
                 try:
-                    from attendance_normalizer import load_contract_config
-                    contract_types, employee_contracts = load_contract_config()
+                    daily_path = output_dir / "daily_summary.csv"
+                    if daily_path.exists():
+                        daily = pd.read_csv(daily_path, encoding="utf-8-sig", nrows=1)
+                        daily.columns = [str(c).strip().lstrip("\ufeff") for c in daily.columns]
+                        if "date" in daily.columns:
+                            daily_full = pd.read_csv(daily_path, encoding="utf-8-sig")
+                            daily_full.columns = [str(c).strip().lstrip("\ufeff") for c in daily_full.columns]
+                            daily_full["date"] = pd.to_datetime(daily_full["date"]).dt.normalize()
+                            from payroll_calculator import _infer_payroll_period
+                            payroll_start, payroll_end = _infer_payroll_period(daily_full)
+                            from leave_merger import get_weekday_public_holidays_kr
+                            holiday_dates = get_weekday_public_holidays_kr(payroll_start, payroll_end)
+                            pay_cols_set = {"base_pay", "overtime_pay", "overtime_hours", "weekly_allowance_pay", "weekly_allowance_hours", "unpaid_hours", "total_pay"}
+                            for c in df.columns:
+                                if c in ("employee_id", "employee_name", "_contract_override") or c in pay_cols_set or str(c).strip().startswith("주휴") or "주휴용" in str(c):
+                                    continue
+                                part = str(c).split("\n")[0].strip()
+                                if "/" in part:
+                                    try:
+                                        m, d = map(int, part.split("/", 1))
+                                        year = payroll_start.year if m >= payroll_start.month else payroll_start.year - 1
+                                        from datetime import date as date_cls
+                                        date_col_to_date[c] = date_cls(year, m, d)
+                                    except (ValueError, TypeError):
+                                        pass
                 except Exception:
                     pass
-            holiday_dates = set()
-            date_col_to_date = {}
-            try:
-                daily_path = output_dir / "daily_summary.csv"
-                if daily_path.exists():
-                    daily = pd.read_csv(daily_path, encoding="utf-8-sig", nrows=1)
-                    daily.columns = [str(c).strip().lstrip("\ufeff") for c in daily.columns]
-                    if "date" in daily.columns:
-                        daily_full = pd.read_csv(daily_path, encoding="utf-8-sig")
-                        daily_full.columns = [str(c).strip().lstrip("\ufeff") for c in daily_full.columns]
-                        daily_full["date"] = pd.to_datetime(daily_full["date"]).dt.normalize()
-                        from payroll_calculator import _infer_payroll_period
-                        payroll_start, payroll_end = _infer_payroll_period(daily_full)
-                        from leave_merger import get_weekday_public_holidays_kr
-                        holiday_dates = get_weekday_public_holidays_kr(payroll_start, payroll_end)
-                        pay_cols_set = {"base_pay", "overtime_pay", "overtime_hours", "weekly_allowance_pay", "weekly_allowance_hours", "unpaid_hours", "total_pay"}
-                        for c in df.columns:
-                            if c in ("employee_id", "employee_name", "_contract_override") or c in pay_cols_set or str(c).strip().startswith("주휴") or "주휴용" in str(c):
-                                continue
-                            part = str(c).split("\n")[0].strip()
-                            if "/" in part:
-                                try:
-                                    m, d = map(int, part.split("/", 1))
-                                    year = payroll_start.year if m >= payroll_start.month else payroll_start.year - 1
-                                    from datetime import date as date_cls
-                                    date_col_to_date[c] = date_cls(year, m, d)
-                                except (ValueError, TypeError):
-                                    pass
-            except Exception:
-                pass
-            _recalc_pay_from_date_columns(df, contract_types=contract_types, employee_contracts=employee_contracts, holiday_dates=holiday_dates, date_col_to_date=date_col_to_date)
+                _recalc_pay_from_date_columns(df, contract_types=contract_types, employee_contracts=employee_contracts, holiday_dates=holiday_dates, date_col_to_date=date_col_to_date)
 
-            df_export = df.drop(columns=["_contract_override"], errors="ignore")
-            csv_path = output_dir / "payroll_result.csv"
-            df_export.to_csv(csv_path, index=False, encoding="utf-8-sig")
+                df_export = df.drop(columns=["_contract_override"], errors="ignore")
+                csv_path = output_dir / "payroll_result.csv"
+                df_export.to_csv(csv_path, index=False, encoding="utf-8-sig")
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"수정된 테이블 데이터를 저장하지 못했습니다: {e}"}), 400
+
+        try:
+            from google_sheet_exporter import create_google_sheet
+            url = create_google_sheet(output_dir)
+            return jsonify({"ok": True, "url": url})
+        except FileNotFoundError as e:
+            return jsonify({"ok": False, "error": str(e)}), 404
+        except RuntimeError as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
         except Exception as e:
-            return jsonify({"ok": False, "error": f"수정된 테이블 데이터를 저장하지 못했습니다: {e}"}), 400
-
-    try:
-        from google_sheet_exporter import create_google_sheet
-        url = create_google_sheet(output_dir)
-        return jsonify({"ok": True, "url": url})
-    except FileNotFoundError as e:
-        return jsonify({"ok": False, "error": str(e)}), 404
-    except RuntimeError as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"내보내기 실패: {e}"}), 500
+            return jsonify({"ok": False, "error": f"내보내기 실패: {e}"}), 500
 
 
 if __name__ == "__main__":
