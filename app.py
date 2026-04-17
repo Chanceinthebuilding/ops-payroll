@@ -49,6 +49,18 @@ _gcs_storage_loaded = False
 _gcs_storage_mod = None
 logger = logging.getLogger(__name__)
 
+# 배포·업데이트마다 패치 번호를 올리거나, Railway 변수 APP_VERSION(예: 1.0.1 또는 v1.0.1)으로 덮어씀
+APP_VERSION_DEFAULT = "1.0.0"
+
+
+def app_version_display() -> str:
+    raw = (os.environ.get("APP_VERSION") or "").strip()
+    if not raw:
+        raw = APP_VERSION_DEFAULT
+    if raw.lower().startswith("v"):
+        return raw
+    return f"v{raw}"
+
 
 @app.route("/login")
 def login_page():
@@ -81,7 +93,7 @@ def dashboard():
 
 @app.route("/healthz")
 def healthz():
-    return jsonify({"ok": True}), 200
+    return jsonify({"ok": True, "version": app_version_display()}), 200
 
 
 def _gcs_bucket_name() -> str:
@@ -822,7 +834,7 @@ def _make_payroll_result_response(
 
 @app.context_processor
 def inject_nav():
-    return {"is_admin_user": is_current_user_admin()}
+    return {"is_admin_user": is_current_user_admin(), "app_version": app_version_display()}
 
 
 @app.route("/", methods=["GET"])
