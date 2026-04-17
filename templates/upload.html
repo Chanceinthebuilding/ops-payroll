@@ -164,6 +164,24 @@
           <button type="submit" class="btn" id="submitBtn" disabled>결과 보기</button>
         </div>
       </form>
+
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0 22px;">
+
+      <h2 style="margin: 0 0 8px; font-size: 1.15rem; font-weight: 700; color: #0f172a;">FM 기본정보 (선택)</h2>
+      <p class="sub" style="margin-bottom: 16px;">
+        대시보드에서 <strong>역할(팀)별 급여 집계</strong>에 씁니다. 시트 첫 행에 <code>사번</code>, <code>역할</code> 컬럼이 있어야 합니다.
+        {% if fm_roster_on_disk %}<span style="color:#059669;font-weight:600;">현재 등록됨.</span>{% else %}아직 없음.{% endif %}
+      </p>
+      <form action="{{ url_for('admin_fm_roster') }}" method="post" enctype="multipart/form-data" id="formFm">
+        <label class="zone" id="dropzoneFm" for="file_fm" style="padding: 24px 18px;">
+          <input type="file" name="file_fm" id="file_fm" accept=".xlsx,.xls" required>
+          <p id="labelFm">FM 목록 xlsx를 선택하세요 (예: FM_목록_날짜.xlsx)</p>
+          <p class="hint">저장 시 GCS <code>metadata/fm_roster.xlsx</code> 및 서버 로컬에 반영됩니다.</p>
+        </label>
+        <div class="footer">
+          <button type="submit" class="btn" id="btnFm" style="background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);">FM 목록 저장</button>
+        </div>
+      </form>
     </section>
   </div>
 
@@ -202,6 +220,30 @@
       e.preventDefault(); dropzone2.classList.remove('dragover');
       if (e.dataTransfer.files.length) { fileLeave.files = e.dataTransfer.files; updateLabel2(); }
     });
+
+    var fileFm = document.getElementById('file_fm');
+    var labelFm = document.getElementById('labelFm');
+    var dropzoneFm = document.getElementById('dropzoneFm');
+    var formFm = document.getElementById('formFm');
+    if (fileFm && labelFm) {
+      fileFm.addEventListener('change', function() {
+        labelFm.textContent = fileFm.files.length ? ('선택: ' + fileFm.files[0].name) : 'FM 목록 xlsx를 선택하세요 (예: FM_목록_날짜.xlsx)';
+      });
+    }
+    if (dropzoneFm && fileFm) {
+      dropzoneFm.addEventListener('dragover', function(e) { e.preventDefault(); dropzoneFm.classList.add('dragover'); });
+      dropzoneFm.addEventListener('dragleave', function() { dropzoneFm.classList.remove('dragover'); });
+      dropzoneFm.addEventListener('drop', function(e) {
+        e.preventDefault(); dropzoneFm.classList.remove('dragover');
+        if (e.dataTransfer.files.length) { fileFm.files = e.dataTransfer.files; labelFm.textContent = '선택: ' + fileFm.files[0].name; }
+      });
+    }
+    if (formFm) {
+      formFm.addEventListener('submit', function() {
+        var btn = document.getElementById('btnFm');
+        if (btn) btn.disabled = true;
+      });
+    }
   </script>
 </body>
 </html>

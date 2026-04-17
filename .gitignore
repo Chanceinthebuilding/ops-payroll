@@ -12,6 +12,9 @@ debug_*.png
 input/
 output/
 
+# Windows에서 실수로 생기는 예약 이름 파일(git add 불가)
+nul
+
 # Python
 __pycache__/
 *.pyc

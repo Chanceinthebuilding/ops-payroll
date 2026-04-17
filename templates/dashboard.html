@@ -116,6 +116,39 @@
       </article>
     </section>
 
+    {% if fm_roster_ready %}
+    <section class="layout" style="margin-bottom: 14px;">
+      <article class="card" style="grid-column: 1 / -1;">
+        <h2>역할(FM 목록)별 급여 집계</h2>
+        <p class="sub" style="margin: 0 0 12px; font-size: 0.88rem;">
+          급여 테이블 사번과 FM 목록을 매칭했습니다.
+          (매칭됨 <strong>{{ fm_matched_in_payroll }}</strong> / 급여 행 <strong>{{ fm_payroll_rows }}</strong>)
+        </p>
+        <table>
+          <thead>
+            <tr><th>역할</th><th class="num">인원(고유 사번)</th><th class="num">합산 급여</th></tr>
+          </thead>
+          <tbody>
+            {% for r in fm_role_rows %}
+            <tr>
+              <td>{{ r.role }}</td>
+              <td class="num">{{ r.headcount }}</td>
+              <td class="num">{{ "{:,}".format(r.total_pay) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </article>
+    </section>
+    {% else %}
+    <section class="layout" style="margin-bottom: 14px;">
+      <article class="muted-card" style="grid-column: 1 / -1;">
+        <p style="margin:0 0 8px;"><strong>역할별 집계</strong>를 보려면 관리자가 <a class="link" href="{{ url_for('admin_data') }}">관리자 데이터</a>에서 <strong>FM 기본정보</strong> xlsx(컬럼: 사번, 역할)를 업로드하세요.</p>
+        <p style="margin:0; font-size:0.88rem;">파일은 GCS <code>metadata/fm_roster.xlsx</code> 로 최신만 유지됩니다.</p>
+      </article>
+    </section>
+    {% endif %}
+
     <section class="layout">
       <article class="card">
         <h2>일자별 인건비 추이</h2>

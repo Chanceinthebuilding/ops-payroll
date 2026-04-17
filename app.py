@@ -29,6 +29,9 @@ OUTPUT_BASE = ROOT / "output"
 PUBLISHED_ID = "published"
 PUBLISHED_DIR = OUTPUT_BASE / PUBLISHED_ID
 PUBLISHED_FILES = ("daily_summary.csv", "payroll_result.csv", "anomaly_report.csv")
+FM_ROSTER_FILENAME = "fm_roster.xlsx"
+FM_ROSTER_LOCAL_DIR = OUTPUT_BASE / "metadata"
+FM_ROSTER_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / FM_ROSTER_FILENAME
 KST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(ROOT))
 CONTRACT_CONFIG_PATH = ROOT / "contract_config.yaml"
@@ -87,6 +90,7 @@ def dashboard():
         tmp_dir = Path(tmp)
         if not _download_published_to_dir(tmp_dir):
             return render_template("dashboard.html", dashboard_ready=False)
+        _attach_fm_roster_to_dir(tmp_dir)
         ctx = _build_dashboard_context(tmp_dir)
         return render_template("dashboard.html", **ctx)
 
@@ -200,6 +204,16 @@ def _published_blob_name(filename: str) -> str:
     return f"published/{filename}"
 
 
+def _fm_roster_blob_name() -> str:
+    return f"metadata/{FM_ROSTER_FILENAME}"
+
+
+def _fm_roster_exists_remote_or_local() -> bool:
+    if gcs_enabled():
+        return _gcs_blob_exists(_fm_roster_blob_name())
+    return FM_ROSTER_LOCAL_PATH.is_file()
+
+
 def _published_exists() -> bool:
     if gcs_enabled():
         return _gcs_blob_exists(_published_blob_name("payroll_result.csv"))
@@ -220,6 +234,19 @@ def _download_published_to_dir(target_dir: Path) -> bool:
         if src.exists():
             shutil.copy2(src, target_dir / name)
     return (target_dir / "payroll_result.csv").exists()
+
+
+def _attach_fm_roster_to_dir(target_dir: Path) -> bool:
+    """FM 기본정보 xlsx를 target_dir / fm_roster.xlsx 로 둠 (GCS 우선, 없으면 로컬 output/metadata)."""
+    dest = target_dir / FM_ROSTER_FILENAME
+    if gcs_enabled():
+        if _gcs_download_file(_fm_roster_blob_name(), dest):
+            return True
+    if FM_ROSTER_LOCAL_PATH.is_file():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(FM_ROSTER_LOCAL_PATH, dest)
+        return True
+    return False
 
 
 def _sync_run_to_gcs(run_dir: Path, input_path: Path, leave_path: Path | None = None, uploaded_by: str | None = None):
@@ -269,6 +296,53 @@ def _safe_read_csv(path):
         return pd.read_csv(p, encoding="utf-8-sig")
     except Exception:
         return pd.DataFrame()
+
+
+def _normalize_employee_id_val(val):
+    import pandas as pd
+
+    if val is None:
+        return ""
+    if isinstance(val, float) and pd.isna(val):
+        return ""
+    s = str(val).strip().replace(",", "")
+    if not s or s.lower() == "nan":
+        return ""
+    try:
+        f = float(s)
+        if abs(f - int(f)) < 1e-9:
+            return str(int(f))
+        return s
+    except (ValueError, TypeError, OverflowError):
+        return s
+
+
+def _load_fm_roster_pairs(path: Path):
+    """FM 목록 xlsx에서 (사번, 역할) 정규화 테이블. 실패 시 None."""
+    import pandas as pd
+
+    if not path.is_file():
+        return None
+    try:
+        df = pd.read_excel(path, sheet_name=0, header=0, engine="openpyxl")
+    except Exception:
+        try:
+            df = pd.read_excel(path, sheet_name=0, header=0)
+        except Exception:
+            return None
+    df.columns = [str(c).strip() for c in df.columns]
+    if "사번" not in df.columns or "역할" not in df.columns:
+        return None
+    out = pd.DataFrame(
+        {
+            "eid_norm": df["사번"].map(_normalize_employee_id_val),
+            "fm_role": df["역할"].astype(str).str.strip(),
+        }
+    )
+    out = out[out["eid_norm"].str.len() > 0].drop_duplicates(subset=["eid_norm"], keep="last")
+    if out.empty:
+        return None
+    return out
 
 
 def _build_dashboard_context(output_dir: Path):
@@ -382,6 +456,34 @@ def _build_dashboard_context(output_dir: Path):
     first_date = daily_cost["date_key"].iloc[0] if len(daily_cost) else "-"
     last_date = daily_cost["date_key"].iloc[-1] if len(daily_cost) else "-"
 
+    fm_path = output_dir / FM_ROSTER_FILENAME
+    fm_pairs = _load_fm_roster_pairs(fm_path)
+    fm_roster_ready = fm_pairs is not None
+    fm_role_rows: list[dict] = []
+    fm_matched_in_payroll = 0
+    fm_payroll_rows = int(len(payroll))
+    if fm_roster_ready and "employee_id" in payroll.columns and "total_pay" in payroll.columns:
+        pm = payroll.copy()
+        pm["eid_norm"] = pm["employee_id"].map(_normalize_employee_id_val)
+        merged = pm.merge(fm_pairs, on="eid_norm", how="left")
+        fm_matched_in_payroll = int(merged["fm_role"].notna().sum())
+        merged["fm_role"] = merged["fm_role"].fillna("(FM 목록 없음)")
+        tpm = merged["total_pay"].apply(_to_num)
+        role_grp = (
+            merged.assign(total_pay_num=tpm)
+            .groupby("fm_role", as_index=False)
+            .agg(headcount=("employee_id", "nunique"), total_pay=("total_pay_num", "sum"))
+            .sort_values("total_pay", ascending=False)
+        )
+        fm_role_rows = [
+            {
+                "role": str(r["fm_role"]),
+                "headcount": int(r["headcount"]),
+                "total_pay": int(round(float(r["total_pay"]))),
+            }
+            for _, r in role_grp.iterrows()
+        ]
+
     return {
         "dashboard_ready": True,
         "kpi_total_pay": total_pay,
@@ -396,6 +498,10 @@ def _build_dashboard_context(output_dir: Path):
         "weekly_chart_values": weekly_chart_values,
         "top_employee_rows": top_employee_rows,
         "daily_rank_rows": daily_rank_rows,
+        "fm_roster_ready": fm_roster_ready,
+        "fm_role_rows": fm_role_rows,
+        "fm_matched_in_payroll": fm_matched_in_payroll,
+        "fm_payroll_rows": fm_payroll_rows,
     }
 
 
@@ -942,7 +1048,11 @@ def _make_payroll_result_response(
 
 @app.context_processor
 def inject_nav():
-    return {"is_admin_user": is_current_user_admin(), "app_version": app_version_display()}
+    return {
+        "is_admin_user": is_current_user_admin(),
+        "app_version": app_version_display(),
+        "fm_roster_on_disk": FM_ROSTER_LOCAL_PATH.is_file(),
+    }
 
 
 @app.route("/", methods=["GET"])
@@ -1014,6 +1124,46 @@ def save_published_payroll():
             ), 500
 
     return jsonify({"ok": True, "message": "공개 급여 데이터가 저장되었습니다."})
+
+
+@app.route("/admin/fm-roster", methods=["POST"])
+def admin_fm_roster():
+    """FM 기본정보 xlsx — 로컬 output/metadata + GCS metadata/fm_roster.xlsx."""
+    if not is_current_user_admin():
+        flash("관리자만 접근할 수 있습니다.", "error")
+        return redirect(url_for("index"))
+    f = request.files.get("file_fm")
+    if not f or not f.filename or not str(f.filename).strip():
+        flash("FM 목록 파일을 선택해 주세요.", "error")
+        return redirect(url_for("admin_data"))
+    if not f.filename.lower().endswith((".xlsx", ".xls")):
+        flash("FM 목록은 .xlsx 또는 .xls 만 업로드할 수 있습니다.", "error")
+        return redirect(url_for("admin_data"))
+    try:
+        FM_ROSTER_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+        dest = FM_ROSTER_LOCAL_PATH
+        f.save(str(dest))
+        pairs = _load_fm_roster_pairs(dest)
+        if pairs is None:
+            dest.unlink(missing_ok=True)
+            flash("FM 엑셀에 필수 컬럼(사번, 역할)이 없거나 내용을 읽을 수 없습니다.", "error")
+            return redirect(url_for("admin_data"))
+        n = len(pairs)
+        if gcs_enabled():
+            ct = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            if dest.suffix.lower() == ".xls":
+                ct = "application/vnd.ms-excel"
+            _gcs_upload_file(dest, _fm_roster_blob_name(), content_type=ct)
+        elif _gcs_env_configured() and not gcs_enabled():
+            flash(
+                "GCS 라이브러리를 불러오지 못해 원격에는 저장하지 못했습니다. 로컬에만 저장되었습니다.",
+                "warning",
+            )
+        flash(f"FM 기본정보를 반영했습니다. (고유 사번 {n}건, 대시보드 역할별 집계에 사용)", "success")
+    except Exception as e:
+        logger.exception("FM roster upload")
+        flash(f"FM 파일 저장 실패: {e}", "error")
+    return redirect(url_for("admin_data"))
 
 
 @app.route("/admin/data", methods=["GET", "POST"])
