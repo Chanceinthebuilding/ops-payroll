@@ -1,4 +1,4 @@
-{# NYJ payroll data center — 급여 테이블: payroll / 대시보드: dashboard / 관리자 업로드: FAB + admin_data #}
+{# NYJ Workforce Management — 급여 테이블: payroll / 대시보드: dashboard / 관리자 업로드: FAB + admin_data #}
 {% set ep = request.endpoint %}
 <style>
   .nav-pill {
@@ -21,7 +21,7 @@
   }
 </style>
 <header style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; padding:10px 14px; border:1px solid rgba(255,255,255,0.72); border-radius:16px; background:rgba(255,255,255,0.62); backdrop-filter: blur(12px); box-shadow:0 6px 18px rgba(15,23,42,0.06);">
-  <span style="color:#111827;font-weight:700;font-size:0.95rem; letter-spacing:-0.02em;">NYJ payroll data center</span>
+  <span style="color:#111827;font-weight:700;font-size:0.95rem; letter-spacing:-0.02em;">NYJ Workforce Management</span>
   <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin-left:auto;">
     <span title="배포 버전" style="font-size:0.72rem; color:#94a3b8; font-weight:600; letter-spacing:0.03em; white-space:nowrap;">{{ app_version }}</span>
     {% if auth_enabled %}
