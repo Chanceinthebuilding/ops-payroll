@@ -14,10 +14,8 @@ from pathlib import Path
 
 try:
     from dotenv import load_dotenv
-
-    load_dotenv()
 except ImportError:
-    pass
+    load_dotenv = None
 
 from flask import Flask, make_response, redirect, render_template, request, flash, session, jsonify, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -25,6 +23,9 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from auth_google import auth_disabled, register_google_auth
 
 ROOT = Path(__file__).resolve().parent
+if load_dotenv is not None:
+    # 실행 위치(cwd)와 무관하게 프로젝트 루트 .env를 우선 로드한다.
+    load_dotenv(ROOT / ".env")
 OUTPUT_BASE = ROOT / "output"
 PUBLISHED_ID = "published"
 PUBLISHED_DIR = OUTPUT_BASE / PUBLISHED_ID
