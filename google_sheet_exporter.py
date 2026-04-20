@@ -22,10 +22,10 @@ UNPAID_HOURLY_RATE = 11_000  # 무급시간당 차감 (원), 무급휴가 = unpa
 TARGET_SPREADSHEET_ID = "18skwWPXVf6aNMyJb8u7PiExSX_dBcqrNrYciZE0DgWY"
 
 # 정규직 사원코드 (이 인원은 상용직 시트에서 제외, 정규직 시트에만 포함)
-REGULAR_EMPLOYEE_IDS = {"45", "47", "52", "63", "101", "104", "117", "124", "128", "135", "139", "153"}
+REGULAR_EMPLOYEE_IDS = {"45", "47", "52", "63", "101", "104", "117", "124", "128", "135", "139", "153","122","123","125"}
 
 # 육아수당 지급 대상 사원코드 (상용직 시트). 기본급에서 200,000원 차감 후 육아수당 항목으로 표시
-CHILDCARE_ALLOWANCE_EMPLOYEE_IDS = {"125"}
+CHILDCARE_ALLOWANCE_EMPLOYEE_IDS = set()
 CHILDCARE_ALLOWANCE_AMOUNT = 200_000  # 원
 
 # 정규직 시트: 사원별 근로시간/휴게시간 (default와 다른 경우만 지정)
