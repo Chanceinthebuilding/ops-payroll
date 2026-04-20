@@ -33,6 +33,7 @@ FM_ROSTER_FILENAME = "fm_roster.xlsx"
 FM_ROSTER_LOCAL_DIR = OUTPUT_BASE / "metadata"
 FM_ROSTER_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / FM_ROSTER_FILENAME
 FM_UPLOAD_META_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / "fm_upload_meta.json"
+COMMERCIALIZATION_REMARKS_PATH = FM_ROSTER_LOCAL_DIR / "commercialization_remarks.json"
 PUBLISHED_META_FILENAME = "meta.json"
 KST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(ROOT))
@@ -95,6 +96,66 @@ def dashboard():
         _attach_fm_roster_to_dir(tmp_dir)
         ctx = _build_dashboard_context(tmp_dir)
         return render_template("dashboard.html", **ctx)
+
+
+@app.route("/commercialization")
+def commercialization_dashboard():
+    """월별 상품화 개수·FM 인건비(태깅+클리닝+촬영 / +물류) 대시보드. DB 환경변수 필요."""
+    from commercialization_metrics import (
+        build_table_rows,
+        default_range_ym,
+        fetch_labor_monthly,
+        fetch_productized_monthly,
+        fmt_pct,
+        load_remarks,
+    )
+
+    if not (
+        os.environ.get("DB_HOST", "").strip()
+        and os.environ.get("DB_NAME", "").strip()
+        and os.environ.get("DB_USER", "").strip()
+        and os.environ.get("DB_PASSWORD", "").strip()
+    ):
+        return render_template(
+            "commercialization.html",
+            commercialization_ready=False,
+            commercialization_error="DB 연결 정보(DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)가 없습니다.",
+            range_start="",
+            range_end="",
+            rows_fm=None,
+            rows_logistics=None,
+            fmt_pct=fmt_pct,
+            labor_sql_configured=False,
+        )
+
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+    if not start or not end:
+        start, end = default_range_ym()
+
+    productized, err_p = fetch_productized_monthly(start, end)
+    labor, err_l = fetch_labor_monthly()
+    labor_sql_configured = bool((os.environ.get("COMMERCIALIZATION_LABOR_MONTHLY_SQL") or "").strip())
+
+    err = None
+    if err_p or err_l:
+        err = " ".join(s for s in (err_p, err_l) if s)
+    remarks = load_remarks(COMMERCIALIZATION_REMARKS_PATH)
+
+    rows_fm = build_table_rows(productized, labor, remarks, include_logistics=False)
+    rows_log = build_table_rows(productized, labor, remarks, include_logistics=True)
+
+    return render_template(
+        "commercialization.html",
+        commercialization_ready=True,
+        commercialization_error=err,
+        range_start=start,
+        range_end=end,
+        rows_fm=rows_fm,
+        rows_logistics=rows_log,
+        fmt_pct=fmt_pct,
+        labor_sql_configured=labor_sql_configured,
+    )
 
 
 @app.route("/healthz")

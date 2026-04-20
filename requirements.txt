@@ -10,6 +10,7 @@ flask>=3.0.0
 flask-dance>=7.0.0
 python-dotenv>=1.0.0
 gunicorn>=22.0.0
+psycopg2-binary>=2.9.9
 
 # 구글 시트 내보내기 (선택)
 gspread>=6.0.0
