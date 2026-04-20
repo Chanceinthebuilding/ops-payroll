@@ -68,6 +68,7 @@ def _db_config() -> dict[str, str]:
     name = _first_env("DB_NAME", "database")
     user = _first_env("DB_USER", "user")
     pw = _first_env("DB_PASSWORD", "password")
+    sslmode = _first_env("DB_SSLMODE", "PGSSLMODE")
     return {
         "dsn": dsn,
         "host": host,
@@ -75,6 +76,7 @@ def _db_config() -> dict[str, str]:
         "name": name,
         "user": user,
         "password": pw,
+        "sslmode": sslmode,
     }
 
 
@@ -103,13 +105,18 @@ def _db_connect():
         return psycopg2.connect(cfg["dsn"], connect_timeout=timeout)
     if not (cfg["host"] and cfg["name"] and cfg["user"] and cfg["password"]):
         raise RuntimeError(db_config_error_message())
+    kwargs: dict[str, Any] = {
+        "host": cfg["host"],
+        "port": cfg["port"],
+        "dbname": cfg["name"],
+        "user": cfg["user"],
+        "password": cfg["password"],
+        "connect_timeout": timeout,
+    }
+    if cfg["sslmode"]:
+        kwargs["sslmode"] = cfg["sslmode"]
     return psycopg2.connect(
-        host=cfg["host"],
-        port=cfg["port"],
-        dbname=cfg["name"],
-        user=cfg["user"],
-        password=cfg["password"],
-        connect_timeout=timeout,
+        **kwargs,
     )
 
 
