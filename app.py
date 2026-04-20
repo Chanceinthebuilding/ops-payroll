@@ -104,23 +104,20 @@ def commercialization_dashboard():
     """월별 상품화 개수·FM 인건비(태깅+클리닝+촬영 / +물류) 대시보드. DB 환경변수 필요."""
     from commercialization_metrics import (
         build_table_rows,
+        db_config_error_message,
         default_range_ym,
         fetch_labor_monthly,
         fetch_productized_monthly,
         fmt_pct,
+        has_db_config,
         load_remarks,
     )
 
-    if not (
-        os.environ.get("DB_HOST", "").strip()
-        and os.environ.get("DB_NAME", "").strip()
-        and os.environ.get("DB_USER", "").strip()
-        and os.environ.get("DB_PASSWORD", "").strip()
-    ):
+    if not has_db_config():
         return render_template(
             "commercialization.html",
             commercialization_ready=False,
-            commercialization_error="DB 연결 정보(DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)가 없습니다.",
+            commercialization_error=db_config_error_message(),
             range_start="",
             range_end="",
             rows_fm=None,

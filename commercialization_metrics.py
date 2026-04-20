@@ -46,16 +46,70 @@ def default_range_ym() -> tuple[str, str]:
     return start, end
 
 
+def _first_env(*keys: str) -> str:
+    for k in keys:
+        v = (os.environ.get(k) or "").strip()
+        if v:
+            return v
+    return ""
+
+
+def _db_config() -> dict[str, str]:
+    """
+    DB 접속 설정을 환경변수에서 읽는다.
+    지원 키:
+    - DATABASE_URL
+    - DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD
+    - host/port/database/user/password
+    """
+    dsn = _first_env("DATABASE_URL", "database_url")
+    host = _first_env("DB_HOST", "host")
+    port = _first_env("DB_PORT", "port") or "5432"
+    name = _first_env("DB_NAME", "database")
+    user = _first_env("DB_USER", "user")
+    pw = _first_env("DB_PASSWORD", "password")
+    return {
+        "dsn": dsn,
+        "host": host,
+        "port": port,
+        "name": name,
+        "user": user,
+        "password": pw,
+    }
+
+
+def has_db_config() -> bool:
+    cfg = _db_config()
+    if cfg["dsn"]:
+        return True
+    return bool(cfg["host"] and cfg["name"] and cfg["user"] and cfg["password"])
+
+
+def db_config_error_message() -> str:
+    return (
+        "DB 연결 정보가 없습니다. "
+        "환경변수 DATABASE_URL 또는 "
+        "(DB_HOST/DB_NAME/DB_USER/DB_PASSWORD) "
+        "또는 (host/database/user/password) 를 설정해 주세요."
+    )
+
+
 def _db_connect():
     import psycopg2
 
+    cfg = _db_config()
+    timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "15"))
+    if cfg["dsn"]:
+        return psycopg2.connect(cfg["dsn"], connect_timeout=timeout)
+    if not (cfg["host"] and cfg["name"] and cfg["user"] and cfg["password"]):
+        raise RuntimeError(db_config_error_message())
     return psycopg2.connect(
-        host=os.environ["DB_HOST"],
-        port=os.environ.get("DB_PORT", "5432"),
-        dbname=os.environ["DB_NAME"],
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
-        connect_timeout=int(os.environ.get("DB_CONNECT_TIMEOUT", "15")),
+        host=cfg["host"],
+        port=cfg["port"],
+        dbname=cfg["name"],
+        user=cfg["user"],
+        password=cfg["password"],
+        connect_timeout=timeout,
     )
 
 
