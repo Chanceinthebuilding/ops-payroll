@@ -19,6 +19,51 @@
     color: #1d4ed8;
     font-weight: 700;
   }
+  .global-loading-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.34);
+    z-index: 9999;
+    backdrop-filter: blur(1px);
+  }
+  .global-loading-overlay.show { display: flex; }
+  .global-loading-card {
+    min-width: 220px;
+    padding: 20px 24px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.24);
+    text-align: center;
+  }
+  .global-loading-icon {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 10px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    animation: loading-hourglass-spin 1.15s linear infinite;
+  }
+  .global-loading-text {
+    margin: 0;
+    color: #334155;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  @keyframes loading-hourglass-spin {
+    0% { transform: rotate(0deg); }
+    50% { transform: rotate(180deg); }
+    100% { transform: rotate(360deg); }
+  }
 </style>
 <header style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; padding:10px 14px; border:1px solid rgba(255,255,255,0.72); border-radius:16px; background:rgba(255,255,255,0.62); backdrop-filter: blur(12px); box-shadow:0 6px 18px rgba(15,23,42,0.06);">
   <span style="color:#111827;font-weight:700;font-size:0.95rem; letter-spacing:-0.02em;">NYJ Workforce Management</span>
@@ -46,3 +91,45 @@
     {% endif %}
   </div>
 </header>
+<div class="global-loading-overlay" id="globalLoadingOverlay" aria-hidden="true">
+  <div class="global-loading-card" role="status" aria-live="polite">
+    <div class="global-loading-icon" aria-hidden="true">⌛</div>
+    <p class="global-loading-text">로딩 중입니다...</p>
+  </div>
+</div>
+<script>
+  (function () {
+    if (window.__globalLoadingOverlayInit) return;
+    window.__globalLoadingOverlayInit = true;
+
+    var overlay = document.getElementById('globalLoadingOverlay');
+    if (!overlay) return;
+
+    function showLoading() {
+      overlay.classList.add('show');
+      overlay.setAttribute('aria-hidden', 'false');
+    }
+
+    document.addEventListener('submit', function (e) {
+      var form = e.target;
+      if (!form || form.dataset.loadingIgnore === '1') return;
+      showLoading();
+    }, true);
+
+    document.addEventListener('click', function (e) {
+      var el = e.target;
+      if (!el || !el.closest) return;
+      var a = el.closest('a[href]');
+      if (!a) return;
+
+      var href = (a.getAttribute('href') || '').trim();
+      if (!href || href === '#' || href.indexOf('javascript:') === 0) return;
+      if (a.target === '_blank' || a.hasAttribute('download') || a.dataset.loadingIgnore === '1') return;
+      showLoading();
+    }, true);
+
+    window.addEventListener('beforeunload', function () {
+      showLoading();
+    });
+  })();
+</script>
