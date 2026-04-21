@@ -24,7 +24,8 @@
       border-radius: 18px;
       padding: 16px 14px;
       box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
-      overflow-x: auto;
+      max-height: 74vh;
+      overflow: auto;
     }
     .muted-card {
       background: rgba(255, 255, 255, 0.74);
@@ -34,44 +35,46 @@
       color: #475569;
       line-height: 1.6;
     }
-    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; min-width: 980px; }
-    th, td { padding: 8px 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; min-width: 960px; }
+    th, td { padding: 6px 6px; border-right: 1px solid #d1d9e6; border-bottom: 1px solid #d1d9e6; text-align: left; }
     th {
       color: #334155;
-      font-size: 0.73rem;
+      font-size: 0.7rem;
       font-weight: 800;
       letter-spacing: 0.02em;
       white-space: nowrap;
       background: #f8fafc;
       position: sticky;
       top: 0;
-      z-index: 2;
+      z-index: 4;
     }
+    th:first-child, td:first-child { border-left: 1px solid #d1d9e6; }
+    thead tr:first-child th { border-top: 1px solid #d1d9e6; }
     th.left-sticky, td.left-sticky {
       position: sticky;
       left: 0;
-      z-index: 3;
-      background: #ffffff;
+      z-index: 5;
+      background: #ffffff !important;
     }
     th.left-sticky-2, td.left-sticky-2 {
       position: sticky;
       left: 138px;
-      z-index: 3;
-      background: #ffffff;
+      z-index: 5;
+      background: #ffffff !important;
     }
     th.left-sticky { min-width: 138px; }
     td.left-sticky { min-width: 138px; font-weight: 700; color: #1e293b; }
-    th.left-sticky-2, td.left-sticky-2 { min-width: 168px; }
+    th.left-sticky-2, td.left-sticky-2 { min-width: 160px; }
     td.left-sticky-2 { color: #334155; }
     td.editable {
-      min-width: 82px;
+      min-width: 56px;
       text-align: right;
       font-variant-numeric: tabular-nums;
       background: #f8fafc;
       outline: none;
     }
     td.readonly {
-      min-width: 82px;
+      min-width: 56px;
       text-align: right;
       color: #334155;
       font-variant-numeric: tabular-nums;
@@ -105,6 +108,41 @@
     }
     .save-bar button:hover { background: #1d4ed8; }
     .save-bar .hint { font-size: 0.82rem; color: #dbeafe; }
+    .group-row td {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      background: #eef2ff;
+      font-weight: 700;
+      color: #1e3a8a;
+      border-top: 1px solid #c7d2fe;
+      border-bottom: 1px solid #c7d2fe;
+    }
+    .group-btn {
+      border: 1px solid #bfdbfe;
+      background: #ffffff;
+      color: #1e40af;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    .cell-toast {
+      position: fixed;
+      pointer-events: none;
+      z-index: 20;
+      background: rgba(15, 23, 42, 0.92);
+      color: #f8fafc;
+      font-size: 0.75rem;
+      line-height: 1.35;
+      border-radius: 10px;
+      padding: 6px 8px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+      display: none;
+      max-width: 240px;
+    }
   </style>
 </head>
 <body>
@@ -127,7 +165,7 @@
             <th class="left-sticky">역할</th>
             <th class="left-sticky-2">닉네임(이름)</th>
             {% for d in date_headers %}
-            <th>{{ d.label }}</th>
+            <th data-date-key="{{ d.key }}">{{ d.label }}</th>
             {% endfor %}
           </tr>
         </thead>
@@ -140,6 +178,7 @@
             <td
               class="{% if can_save %}editable{% else %}readonly{% endif %}"
               data-date="{{ d }}"
+              title="{{ d }} / {{ r.display_name }}"
               {% if can_save %}contenteditable="true"{% endif %}
             >{{ r[d] }}</td>
             {% endfor %}
@@ -161,16 +200,98 @@
     </section>
     {% endif %}
   </div>
+  <div id="cellToast" class="cell-toast"></div>
 
-  {% if overtime_ready and can_save %}
+  {% if overtime_ready %}
   <script>
     (function() {
       var saveUrl = {{ (save_url or "") | tojson }};
+      var canSave = {{ "true" if can_save else "false" }};
       var table = document.getElementById("overtimeTable");
       var saveBar = document.getElementById("saveBar");
       var saveHint = document.getElementById("saveHint");
       var btnSave = document.getElementById("btnSave");
-      if (!saveUrl || !table || !saveBar || !btnSave) return;
+      var cellToast = document.getElementById("cellToast");
+      if (!table) return;
+
+      var dateLabelMap = {};
+      var headerDateCells = table.querySelectorAll("thead th[data-date-key]");
+      headerDateCells.forEach(function(th) {
+        var k = th.getAttribute("data-date-key");
+        if (k) dateLabelMap[k] = (th.textContent || "").trim() || k;
+      });
+
+      function setupGroupRows() {
+        var tbody = table.querySelector("tbody");
+        if (!tbody) return;
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr[data-role]"));
+        var prevRole = null;
+        rows.forEach(function(tr) {
+          var role = (tr.getAttribute("data-role") || "").trim();
+          if (!role || role === prevRole) return;
+          prevRole = role;
+          var g = document.createElement("tr");
+          g.className = "group-row";
+          g.setAttribute("data-group-role", role);
+          var td = document.createElement("td");
+          td.colSpan = {{ 2 + (date_keys|length) }};
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "group-btn";
+          btn.textContent = "접기";
+          btn.setAttribute("data-expanded", "1");
+          btn.addEventListener("click", function() {
+            var expanded = btn.getAttribute("data-expanded") === "1";
+            var walker = g.nextElementSibling;
+            while (walker && !walker.classList.contains("group-row")) {
+              if ((walker.getAttribute("data-role") || "").trim() === role) {
+                walker.style.display = expanded ? "none" : "";
+              }
+              walker = walker.nextElementSibling;
+            }
+            btn.setAttribute("data-expanded", expanded ? "0" : "1");
+            btn.textContent = expanded ? "펼치기" : "접기";
+          });
+          td.appendChild(btn);
+          td.appendChild(document.createTextNode(role));
+          g.appendChild(td);
+          tbody.insertBefore(g, tr);
+        });
+      }
+
+      function showToast(evt, text) {
+        if (!cellToast) return;
+        cellToast.textContent = text;
+        cellToast.style.display = "block";
+        cellToast.style.left = (evt.clientX + 12) + "px";
+        cellToast.style.top = (evt.clientY + 12) + "px";
+      }
+
+      function hideToast() {
+        if (!cellToast) return;
+        cellToast.style.display = "none";
+      }
+
+      function bindCellToast() {
+        var cells = table.querySelectorAll("td[data-date]");
+        cells.forEach(function(td) {
+          td.addEventListener("mouseenter", function(e) {
+            var tr = td.closest("tr[data-role]");
+            if (!tr) return;
+            var d = td.getAttribute("data-date") || "";
+            var role = tr.getAttribute("data-role") || "";
+            var name = tr.getAttribute("data-display-name") || "";
+            var label = dateLabelMap[d] || d;
+            showToast(e, label + " (" + d + ") / " + role + " / " + name);
+          });
+          td.addEventListener("mousemove", function(e) {
+            if (!cellToast || cellToast.style.display === "none") return;
+            cellToast.style.left = (e.clientX + 12) + "px";
+            cellToast.style.top = (e.clientY + 12) + "px";
+          });
+          td.addEventListener("mouseleave", hideToast);
+        });
+      }
 
       function parseEditableText(txt) {
         if (!txt) return "";
@@ -210,6 +331,7 @@
 
       var initial = JSON.stringify(collectRows());
       function updateDirty() {
+        if (!canSave || !saveBar || !saveHint) return;
         var now = JSON.stringify(collectRows());
         var dirty = now !== initial;
         saveBar.style.display = dirty ? "flex" : "none";
@@ -222,6 +344,9 @@
         }
       }
 
+      setupGroupRows();
+      bindCellToast();
+      if (!canSave || !saveUrl || !saveBar || !saveHint || !btnSave) return;
       table.addEventListener("input", updateDirty, true);
       table.addEventListener("blur", updateDirty, true);
       table.addEventListener("change", updateDirty, true);

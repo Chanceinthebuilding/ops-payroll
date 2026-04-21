@@ -423,7 +423,16 @@ def _load_fm_role_name_rows(path: Path) -> list[dict]:
             continue
         seen.add(key)
         rows.append({"role": role, "display_name": display_name})
-    rows.sort(key=lambda x: (x["role"], x["display_name"]))
+    role_order = ("태깅", "클리닝", "촬영", "포장", "물류")
+
+    def _role_rank(role: str) -> int:
+        r = (role or "").strip().lower()
+        for i, label in enumerate(role_order):
+            if label.lower() in r:
+                return i
+        return len(role_order)
+
+    rows.sort(key=lambda x: (_role_rank(x["role"]), x["role"], x["display_name"]))
     return rows
 
 
