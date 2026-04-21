@@ -68,8 +68,10 @@
       border-radius: 999px;
       overflow: hidden;
     }
-    .bar { height: 100%; background: linear-gradient(90deg, #6366f1 0%, #22c55e 100%); border-radius: 999px; }
+    .bar { height: 100%; background: linear-gradient(90deg, #be123c 0%, #f472b6 100%); border-radius: 999px; }
     .trend-val { text-align: right; color: #334155; font-weight: 600; }
+    .trend-row.is-weekly .trend-date,
+    .trend-row.is-weekly .trend-val { color: #b91c1c; font-weight: 700; }
     table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
     th, td { padding: 8px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; }
     th { color: #475569; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.01em; text-transform: uppercase; }
@@ -158,12 +160,13 @@
     <section class="layout">
       <article class="card">
         <h2>일자별 인건비 추이</h2>
-        {% set mx = (chart_values|max) if chart_values else 1 %}
+        <p class="sub" style="margin: 0 0 10px; font-size: 0.85rem;">근무일 행은 출퇴근 기준 기본·야근 합계, <strong style="color:#b91c1c;">붉은 날짜</strong> 행은 해당 일(주휴일·일요일)에 산정된 <strong>주휴수당</strong> 합계입니다.</p>
+        {% set mx = chart_max if chart_max else 1 %}
         <div class="trend-list">
-          {% for i in range(chart_labels|length) %}
-          {% set v = chart_values[i] %}
-          <div class="trend-row">
-            <div class="trend-date">{{ chart_labels[i] }}</div>
+          {% for row in chart_rows %}
+          {% set v = row.amount %}
+          <div class="trend-row{% if row.kind == 'weekly' %} is-weekly{% endif %}">
+            <div class="trend-date">{{ row.date_key }}</div>
             <div class="bar-wrap"><div class="bar" style="width: {{ (v / mx * 100) if mx > 0 else 0 }}%"></div></div>
             <div class="trend-val">{{ "{:,}".format(v|int) }}</div>
           </div>

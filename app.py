@@ -29,7 +29,12 @@ if load_dotenv is not None:
 OUTPUT_BASE = ROOT / "output"
 PUBLISHED_ID = "published"
 PUBLISHED_DIR = OUTPUT_BASE / PUBLISHED_ID
-PUBLISHED_FILES = ("daily_summary.csv", "payroll_result.csv", "anomaly_report.csv")
+PUBLISHED_FILES = (
+    "daily_summary.csv",
+    "payroll_result.csv",
+    "anomaly_report.csv",
+    "weekly_allowance_result.csv",
+)
 FM_ROSTER_FILENAME = "fm_roster.xlsx"
 FM_ROSTER_LOCAL_DIR = OUTPUT_BASE / "metadata"
 FM_ROSTER_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / FM_ROSTER_FILENAME
@@ -718,8 +723,49 @@ def _build_dashboard_context(output_dir: Path):
         .sum()
         .sort_values("date_key")
     )
-    chart_labels = daily_cost["date_key"].tolist()
-    chart_values = [round(float(v), 0) for v in daily_cost["daily_cost"].tolist()]
+    work_by_date: dict[str, float] = {
+        str(r["date_key"]): float(r["daily_cost"]) for _, r in daily_cost.iterrows()
+    }
+
+    # 주휴수당: weekly_allowance_result → 주휴일(일요일) 행으로 합산 (급여 산정기간 내 일요일만)
+    wa_by_sunday: dict[str, float] = {}
+    try:
+        from payroll_calculator import HOURLY_WAGE, _infer_payroll_period, _week_sunday
+
+        ps, pe = _infer_payroll_period(daily)
+        wa_path = output_dir / "weekly_allowance_result.csv"
+        if wa_path.exists():
+            wdf = pd.read_csv(wa_path, encoding="utf-8-sig")
+            wdf.columns = [str(c).strip().lstrip("\ufeff") for c in wdf.columns]
+            if "week_start" in wdf.columns and "weekly_allowance_minutes" in wdf.columns:
+                tmp: dict[str, float] = {}
+                for _, wrow in wdf.iterrows():
+                    try:
+                        sun = _week_sunday(wrow["week_start"])
+                    except Exception:
+                        continue
+                    if not (ps <= sun <= pe):
+                        continue
+                    m = int(round(float(wrow.get("weekly_allowance_minutes") or 0)))
+                    if m <= 0:
+                        continue
+                    piece = round(round(m / 60.0, 1) * HOURLY_WAGE, 0)
+                    sk = sun.isoformat()
+                    tmp[sk] = tmp.get(sk, 0.0) + piece
+                wa_by_sunday = tmp
+    except Exception:
+        logger.exception("dashboard: 주휴 일자별 집계 생략")
+
+    all_day_keys = sorted(set(work_by_date.keys()) | set(wa_by_sunday.keys()))
+    chart_rows: list[dict] = []
+    for dk in all_day_keys:
+        w_amt = work_by_date.get(dk, 0.0)
+        if w_amt > 0:
+            chart_rows.append({"date_key": dk, "amount": int(round(w_amt)), "kind": "work"})
+        wa_amt = wa_by_sunday.get(dk, 0.0)
+        if wa_amt > 0:
+            chart_rows.append({"date_key": dk, "amount": int(round(wa_amt)), "kind": "weekly"})
+    chart_max = max((r["amount"] for r in chart_rows), default=1)
 
     # 주간 트래킹(월요일 시작): 일자 합산(cost)을 week_start(월요일) 기준으로 재집계
     daily["week_start"] = (daily["date"] - pd.to_timedelta(daily["date"].dt.weekday, unit="D")).dt.normalize()
@@ -767,8 +813,8 @@ def _build_dashboard_context(output_dir: Path):
     ]
 
     anomaly_count = int(len(anomaly)) if hasattr(anomaly, "__len__") else 0
-    first_date = daily_cost["date_key"].iloc[0] if len(daily_cost) else "-"
-    last_date = daily_cost["date_key"].iloc[-1] if len(daily_cost) else "-"
+    first_date = all_day_keys[0] if all_day_keys else "-"
+    last_date = all_day_keys[-1] if all_day_keys else "-"
 
     fm_path = output_dir / FM_ROSTER_FILENAME
     fm_roster_data = _load_fm_roster_data(fm_path)
@@ -826,8 +872,8 @@ def _build_dashboard_context(output_dir: Path):
         "payroll_period_end": payroll_period_end,
         "period_start": first_date,
         "period_end": last_date,
-        "chart_labels": chart_labels,
-        "chart_values": chart_values,
+        "chart_rows": chart_rows,
+        "chart_max": chart_max,
         "weekly_chart_labels": weekly_chart_labels,
         "weekly_chart_values": weekly_chart_values,
         "top_employee_rows": top_employee_rows,
