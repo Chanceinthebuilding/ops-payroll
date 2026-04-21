@@ -519,6 +519,22 @@ def _text_추가근무수당(extra_pay: float) -> str:
     return f"추가근무수당 : {hrs:.1f}시간 x 통상시급 = {int(extra_pay):,}원"
 
 
+def _strip_equals_amount_suffix(text: str) -> str:
+    """문자열 끝의 '= {금액}원' 꼬리만 제거."""
+    t = str(text or "").strip()
+    if " = " not in t:
+        return t
+    left, right = t.rsplit(" = ", 1)
+    if not right.endswith("원"):
+        return t
+    amt = right[:-1].strip().replace(",", "")
+    if amt.startswith("-"):
+        amt = amt[1:]
+    if amt.isdigit():
+        return left.strip()
+    return t
+
+
 def _emp_contract_type(eid, employee_contracts: dict) -> str:
     """사번으로 계약 유형 반환."""
     emp_key = str(eid or "").strip()
@@ -647,7 +663,8 @@ def build_email_sheet_data(
             extra_pay += mtw_hrs * HOURLY_RATE
 
         # 정규직은 텍스트_기본급/텍스트_주휴수당 비움. 상용직/프리랜서는 전부 채움. 사번 없음은 최초 출근일~종료일 영업일
-        fill_text = not is_regular_fn(eid)
+        is_regular = is_regular_fn(eid)
+        fill_text = not is_regular
         first_date = r_full.get("first_attendance_date") or ""
         use_first_date = first_date if (eid_str.startswith("미지정") and first_date) else None
         t_base = (
@@ -662,6 +679,12 @@ def build_email_sheet_data(
         t_ot = _text_야근수당(ot_pay)
         t_unpaid = _text_무급휴가(unpaid_hrs)
         t_extra = _text_추가근무수당(extra_pay)
+        if is_regular:
+            t_base = _strip_equals_amount_suffix(t_base)
+            t_wa = _strip_equals_amount_suffix(t_wa)
+            t_ot = _strip_equals_amount_suffix(t_ot)
+            t_unpaid = _strip_equals_amount_suffix(t_unpaid)
+            t_extra = _strip_equals_amount_suffix(t_extra)
 
         sort_key = 0 if type1.startswith("정규직") else (1 if type1.startswith("상용직") else 2)
         data_rows.append((sort_key, [eid_str, type1, real_name, type2, ssn, email, attach, t_base, t_wa, t_ot, t_unpaid, t_extra]))

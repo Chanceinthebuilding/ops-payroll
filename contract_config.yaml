@@ -20,6 +20,11 @@ contract_types:
     break_minutes: 60
     weekdays: [0, 1, 2, 3, 4]
 
+  freelancer_1to6:
+    scheduled_minutes: 270   # 13~18, 휴게 30분 → 4.5h
+    break_minutes: 30
+    weekdays: [0, 1, 2, 3, 4]
+
   standard_9to4.5:
     scheduled_minutes: 420   # 9~16:30, 휴게 30분 → 7h
     break_minutes: 30
@@ -49,6 +54,7 @@ employee_contracts:
   "52": standard_10to6
   "125": standard_9to4.5
   "F119": freelancer_9to4
+  "F120": freelancer_1to6
   # F115: 시프티 미사용 · 일 6시간(360분) — 아래 no_shifty_attendance와 함께 사용
   "F115": freelancer_10to5
   # 예시 (필요 시 추가):
