@@ -227,6 +227,15 @@ def gcs_enabled() -> bool:
     return _gcs_storage_module() is not None
 
 
+def _is_railway_deploy() -> bool:
+    return bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PROJECT_ID"))
+
+
+def _publish_allow_local_only() -> bool:
+    """True면 Railway에서도 GCS 없이 로컬 디스크에만 공개 저장(휘발). 테스트용."""
+    return os.environ.get("ALLOW_PUBLISH_WITHOUT_GCS", "").strip().lower() in ("1", "true", "yes")
+
+
 def _get_gcs_client():
     global _gcs_client
     if _gcs_client is not None:
@@ -1583,9 +1592,29 @@ def save_published_payroll():
         if not ok:
             return jsonify({"ok": False, "error": err or "저장 실패"}), 400
 
+        # Railway: 컨테이너 디스크만 쓰면 재배포 시 사라지므로 GCS 동기화를 기본 필수로 한다.
+        if _is_railway_deploy() and not _publish_allow_local_only():
+            if not _gcs_env_configured():
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "Railway에서는 재배포 후에도 유지되도록 GCS에 올려야 합니다. "
+                        "GCP_PROJECT_ID, GCS_BUCKET, GOOGLE_APPLICATION_CREDENTIALS_JSON을 설정하세요. "
+                        "(임시로 로컬만: ALLOW_PUBLISH_WITHOUT_GCS=1)",
+                    }
+                ), 500
+            if not gcs_enabled():
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "GCS 설정은 있으나 google-cloud-storage를 불러올 수 없습니다. 빌드에 requirements를 확인하세요.",
+                    }
+                ), 500
+
         PUBLISHED_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copy2(tmp_dir / "payroll_result.csv", PUBLISHED_DIR / "payroll_result.csv")
 
+        gcs_ok = False
         if gcs_enabled():
             try:
                 _gcs_upload_file(
@@ -1602,6 +1631,7 @@ def save_published_payroll():
                     json.dumps(meta, ensure_ascii=False, indent=2),
                     _published_blob_name("meta.json"),
                 )
+                gcs_ok = True
             except Exception as e:
                 return jsonify({"ok": False, "error": f"GCS 업로드 실패: {e}"}), 500
         elif _gcs_env_configured() and not gcs_enabled():
@@ -1612,7 +1642,12 @@ def save_published_payroll():
                 }
             ), 500
 
-    return jsonify({"ok": True, "message": "공개 급여 데이터가 저장되었습니다."})
+        msg = "공개 급여 데이터가 저장되었습니다."
+        if gcs_ok:
+            msg += " (GCS published/ 동기화됨)"
+        elif not _is_railway_deploy():
+            msg += " (서버 로컬 output/published만; GCS 미설정 시 재배포 시 유실 가능)"
+        return jsonify({"ok": True, "message": msg, "gcs_synced": gcs_ok})
 
 
 @app.route("/admin/fm-roster", methods=["POST"])
