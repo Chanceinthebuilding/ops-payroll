@@ -30,6 +30,7 @@
       <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' %}is-active{% endif %}">급여 데이터 관리</a>
       <a href="{{ url_for('dashboard') }}" class="nav-pill {% if ep == 'dashboard' %}is-active{% endif %}">인건비 대시보드</a>
       <a href="{{ url_for('commercialization_dashboard') }}" class="nav-pill {% if ep == 'commercialization_dashboard' %}is-active{% endif %}">상품화 인건비</a>
+      <a href="{{ url_for('overtime_status') }}" class="nav-pill {% if ep == 'overtime_status' %}is-active{% endif %}">연장근무 현황</a>
       <a href="{{ url_for('logout') }}" style="color:#475569;text-decoration:none; padding:6px 10px; border-radius:999px; background:#f8fafc; border:1px solid #e2e8f0; font-weight:600;">로그아웃</a>
     </nav>
     {% else %}
@@ -37,6 +38,7 @@
       <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' %}is-active{% endif %}">급여 데이터 관리</a>
       <a href="{{ url_for('dashboard') }}" class="nav-pill {% if ep == 'dashboard' %}is-active{% endif %}">인건비 대시보드</a>
       <a href="{{ url_for('commercialization_dashboard') }}" class="nav-pill {% if ep == 'commercialization_dashboard' %}is-active{% endif %}">상품화 인건비</a>
+      <a href="{{ url_for('overtime_status') }}" class="nav-pill {% if ep == 'overtime_status' %}is-active{% endif %}">연장근무 현황</a>
       {% if is_admin_user %}
       <a href="{{ url_for('admin_data') }}" class="nav-pill {% if ep == 'admin_data' %}is-active{% endif %}">관리자 데이터</a>
       {% endif %}

@@ -40,6 +40,10 @@ FM_ROSTER_LOCAL_DIR = OUTPUT_BASE / "metadata"
 FM_ROSTER_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / FM_ROSTER_FILENAME
 FM_UPLOAD_META_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / "fm_upload_meta.json"
 COMMERCIALIZATION_REMARKS_PATH = FM_ROSTER_LOCAL_DIR / "commercialization_remarks.json"
+OVERTIME_STATUS_FILENAME = "overtime_status.csv"
+OVERTIME_STATUS_META_FILENAME = "overtime_status_meta.json"
+OVERTIME_STATUS_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / OVERTIME_STATUS_FILENAME
+OVERTIME_STATUS_META_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / OVERTIME_STATUS_META_FILENAME
 PUBLISHED_META_FILENAME = "meta.json"
 KST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(ROOT))
@@ -304,6 +308,14 @@ def _fm_upload_meta_blob_name() -> str:
     return "metadata/fm_upload_meta.json"
 
 
+def _overtime_status_blob_name() -> str:
+    return f"metadata/{OVERTIME_STATUS_FILENAME}"
+
+
+def _overtime_status_meta_blob_name() -> str:
+    return f"metadata/{OVERTIME_STATUS_META_FILENAME}"
+
+
 def _fm_roster_exists_remote_or_local() -> bool:
     if gcs_enabled():
         return _gcs_blob_exists(_fm_roster_blob_name())
@@ -343,6 +355,117 @@ def _attach_fm_roster_to_dir(target_dir: Path) -> bool:
         shutil.copy2(FM_ROSTER_LOCAL_PATH, dest)
         return True
     return False
+
+
+def _attach_overtime_status_to_dir(target_dir: Path) -> bool:
+    """연장근무 현황 CSV를 target_dir / overtime_status.csv 로 둠 (GCS 우선, 없으면 로컬 output/metadata)."""
+    dest = target_dir / OVERTIME_STATUS_FILENAME
+    if gcs_enabled():
+        if _gcs_download_file(_overtime_status_blob_name(), dest):
+            return True
+    if OVERTIME_STATUS_LOCAL_PATH.is_file():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(OVERTIME_STATUS_LOCAL_PATH, dest)
+        return True
+    return False
+
+
+def _overtime_date_keys_from_published_dir(output_dir: Path) -> list[str]:
+    import pandas as pd
+
+    daily = _safe_read_csv(output_dir / "daily_summary.csv")
+    if daily.empty or "date" not in daily.columns:
+        return []
+    ds = pd.to_datetime(daily["date"], errors="coerce")
+    keys = sorted({d.strftime("%Y-%m-%d") for d in ds.dropna()})
+    return keys
+
+
+def _load_fm_role_name_rows(path: Path) -> list[dict]:
+    """FM 기본정보에서 역할/닉네임(이름) 조합 행 목록을 생성한다."""
+    import pandas as pd
+
+    if not path.is_file():
+        return []
+    try:
+        df = pd.read_excel(path, sheet_name=0, header=0, engine="openpyxl")
+    except Exception:
+        try:
+            df = pd.read_excel(path, sheet_name=0, header=0)
+        except Exception:
+            return []
+    df.columns = [str(c).strip() for c in df.columns]
+    if "역할" not in df.columns:
+        return []
+
+    name_col = None
+    for c in ("이름", "성명", "직원명", "한글명"):
+        if c in df.columns:
+            name_col = c
+            break
+    nickname_col = "닉네임" if "닉네임" in df.columns else None
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for _, row in df.iterrows():
+        role = str(row.get("역할", "")).strip()
+        if not role:
+            continue
+        nick = _normalize_fm_person_name(row.get(nickname_col)) if nickname_col else ""
+        name = _normalize_fm_person_name(row.get(name_col)) if name_col else ""
+        display_name = nick or name
+        if not display_name:
+            continue
+        if nick and name and nick != name:
+            display_name = f"{nick}({name})"
+        key = f"{role}|{display_name}"
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"role": role, "display_name": display_name})
+    rows.sort(key=lambda x: (x["role"], x["display_name"]))
+    return rows
+
+
+def _build_overtime_status_table(output_dir: Path) -> tuple[list[dict], list[str], bool]:
+    """
+    연장근무 현황 테이블 행/일자컬럼 생성.
+    반환: (rows, date_keys, has_saved_file)
+    """
+    import pandas as pd
+
+    date_keys = _overtime_date_keys_from_published_dir(output_dir)
+    roster_rows = _load_fm_role_name_rows(output_dir / FM_ROSTER_FILENAME)
+    has_saved = _attach_overtime_status_to_dir(output_dir)
+
+    saved_map: dict[str, dict] = {}
+    saved = _safe_read_csv(output_dir / OVERTIME_STATUS_FILENAME)
+    if not saved.empty:
+        saved.columns = [str(c).strip().lstrip("\ufeff") for c in saved.columns]
+        for _, r in saved.iterrows():
+            role = str(r.get("role", "")).strip()
+            display_name = str(r.get("display_name", "")).strip()
+            if not role or not display_name:
+                continue
+            key = f"{role}|{display_name}"
+            row_data = {}
+            for d in date_keys:
+                v = r.get(d, "")
+                if v is None or (isinstance(v, float) and pd.isna(v)):
+                    row_data[d] = ""
+                else:
+                    row_data[d] = str(v).strip()
+            saved_map[key] = row_data
+
+    rows: list[dict] = []
+    for r in roster_rows:
+        key = f"{r['role']}|{r['display_name']}"
+        row = {"role": r["role"], "display_name": r["display_name"]}
+        prev = saved_map.get(key, {})
+        for d in date_keys:
+            row[d] = prev.get(d, "")
+        rows.append(row)
+    return rows, date_keys, has_saved
 
 
 def _read_published_meta_dict() -> dict | None:
@@ -1001,6 +1124,78 @@ def _build_dashboard_context(output_dir: Path):
     }
 
 
+@app.route("/overtime-status")
+def overtime_status():
+    if not _published_exists():
+        return render_template(
+            "overtime_status.html",
+            overtime_ready=False,
+            overtime_error="공개 급여 데이터가 없어 일자를 만들 수 없습니다.",
+            date_keys=[],
+            date_headers=[],
+            rows=[],
+            can_save=False,
+            save_url=None,
+            has_saved=False,
+        )
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        if not _download_published_to_dir(tmp_dir):
+            return render_template(
+                "overtime_status.html",
+                overtime_ready=False,
+                overtime_error="공개 급여 데이터를 불러오지 못했습니다.",
+                date_keys=[],
+                date_headers=[],
+                rows=[],
+                can_save=False,
+                save_url=None,
+                has_saved=False,
+            )
+        _attach_fm_roster_to_dir(tmp_dir)
+        rows, date_keys, has_saved = _build_overtime_status_table(tmp_dir)
+        if not date_keys:
+            return render_template(
+                "overtime_status.html",
+                overtime_ready=False,
+                overtime_error="일자 정보를 찾지 못했습니다. 급여 데이터의 날짜 컬럼을 확인하세요.",
+                date_keys=[],
+                date_headers=[],
+                rows=[],
+                can_save=False,
+                save_url=None,
+                has_saved=has_saved,
+            )
+        if not rows:
+            return render_template(
+                "overtime_status.html",
+                overtime_ready=False,
+                overtime_error="FM 기본정보(역할 + 닉네임/이름)가 없어 테이블을 만들 수 없습니다.",
+                date_keys=[],
+                date_headers=[],
+                rows=[],
+                can_save=False,
+                save_url=None,
+                has_saved=has_saved,
+            )
+        date_headers = [
+            {"key": d, "label": f"{int(d[5:7])}/{int(d[8:10])}"}
+            for d in date_keys
+        ]
+        can_save = is_current_user_admin()
+        return render_template(
+            "overtime_status.html",
+            overtime_ready=True,
+            overtime_error=None,
+            date_keys=date_keys,
+            date_headers=date_headers,
+            rows=rows,
+            can_save=can_save,
+            save_url=(url_for("save_overtime_status") if can_save else None),
+            has_saved=has_saved,
+        )
+
+
 def _is_non_half_hour(val) -> bool:
     """근무시간 소수가 .0 또는 .5가 아니면 True (주휴 제외 일자 컬럼용)."""
     if val is None or val == "":
@@ -1647,6 +1842,138 @@ def save_published_payroll():
             msg += " (GCS published/ 동기화됨)"
         elif not _is_railway_deploy():
             msg += " (서버 로컬 output/published만; GCS 미설정 시 재배포 시 유실 가능)"
+        return jsonify({"ok": True, "message": msg, "gcs_synced": gcs_ok})
+
+
+@app.route("/overtime-status/save", methods=["POST"])
+def save_overtime_status():
+    """관리자 전용: 연장근무 현황 테이블 최신본 저장(로컬 metadata + GCS metadata)."""
+    import pandas as pd
+
+    if not is_current_user_admin():
+        return jsonify({"ok": False, "error": "관리자만 저장할 수 있습니다."}), 403
+
+    data = request.get_json(silent=True) or {}
+    rows_in = data.get("rows")
+    if not isinstance(rows_in, list) or not rows_in:
+        return jsonify({"ok": False, "error": "저장할 테이블 데이터(rows)가 없습니다."}), 400
+
+    if not _published_exists():
+        return jsonify({"ok": False, "error": "공개 급여 데이터가 없어 저장할 수 없습니다."}), 400
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        if not _download_published_to_dir(tmp_dir):
+            return jsonify({"ok": False, "error": "공개 급여 데이터를 불러오지 못했습니다."}), 500
+        if not _attach_fm_roster_to_dir(tmp_dir):
+            return jsonify({"ok": False, "error": "FM 기본정보가 없어 저장할 수 없습니다."}), 400
+
+        roster_rows = _load_fm_role_name_rows(tmp_dir / FM_ROSTER_FILENAME)
+        if not roster_rows:
+            return jsonify({"ok": False, "error": "FM 기본정보(역할/닉네임(이름))를 확인해 주세요."}), 400
+        date_keys = _overtime_date_keys_from_published_dir(tmp_dir)
+        if not date_keys:
+            return jsonify({"ok": False, "error": "급여 데이터에서 일자를 만들 수 없습니다."}), 400
+
+        allowed_row_keys = {f"{r['role']}|{r['display_name']}" for r in roster_rows}
+        incoming_map: dict[str, dict] = {}
+        for r in rows_in:
+            role = str((r or {}).get("role", "")).strip()
+            display_name = str((r or {}).get("display_name", "")).strip()
+            if not role or not display_name:
+                continue
+            row_key = f"{role}|{display_name}"
+            if row_key not in allowed_row_keys:
+                continue
+            row_clean = {}
+            for d in date_keys:
+                raw = (r or {}).get(d, "")
+                if raw is None:
+                    row_clean[d] = ""
+                    continue
+                s = str(raw).strip().replace(",", "")
+                if not s:
+                    row_clean[d] = ""
+                    continue
+                try:
+                    val = float(s)
+                except (TypeError, ValueError):
+                    return jsonify({"ok": False, "error": f"숫자만 입력할 수 있습니다. ({display_name}, {d})"}), 400
+                row_clean[d] = f"{val:g}"
+            incoming_map[row_key] = row_clean
+
+        out_rows = []
+        for r in roster_rows:
+            row_key = f"{r['role']}|{r['display_name']}"
+            vals = incoming_map.get(row_key, {})
+            out = {"role": r["role"], "display_name": r["display_name"]}
+            for d in date_keys:
+                out[d] = vals.get(d, "")
+            out_rows.append(out)
+
+        save_df = pd.DataFrame(out_rows, columns=["role", "display_name"] + date_keys)
+        save_csv_path = tmp_dir / OVERTIME_STATUS_FILENAME
+        save_df.to_csv(save_csv_path, index=False, encoding="utf-8-sig")
+
+        if _is_railway_deploy() and not _publish_allow_local_only():
+            if not _gcs_env_configured():
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "Railway에서는 재배포 후에도 유지되도록 GCS에 올려야 합니다. "
+                        "GCP_PROJECT_ID, GCS_BUCKET, GOOGLE_APPLICATION_CREDENTIALS_JSON을 설정하세요. "
+                        "(임시로 로컬만: ALLOW_PUBLISH_WITHOUT_GCS=1)",
+                    }
+                ), 500
+            if not gcs_enabled():
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "GCS 설정은 있으나 google-cloud-storage를 불러올 수 없습니다. 빌드에 requirements를 확인하세요.",
+                    }
+                ), 500
+
+        FM_ROSTER_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(save_csv_path, OVERTIME_STATUS_LOCAL_PATH)
+        meta = {
+            "saved_at": datetime.now(KST).isoformat(),
+            "saved_by": (session.get("user_email") or ""),
+            "row_count": len(out_rows),
+            "date_count": len(date_keys),
+        }
+        OVERTIME_STATUS_META_LOCAL_PATH.write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        gcs_ok = False
+        if gcs_enabled():
+            try:
+                _gcs_upload_file(
+                    OVERTIME_STATUS_LOCAL_PATH,
+                    _overtime_status_blob_name(),
+                    content_type="text/csv; charset=utf-8",
+                )
+                _gcs_upload_text(
+                    json.dumps(meta, ensure_ascii=False, indent=2),
+                    _overtime_status_meta_blob_name(),
+                )
+                gcs_ok = True
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"GCS 업로드 실패: {e}"}), 500
+        elif _gcs_env_configured() and not gcs_enabled():
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "GCS 라이브러리를 불러오지 못해 원격 저장에 실패했습니다. 환경을 확인하세요.",
+                }
+            ), 500
+
+        msg = "연장근무 현황이 저장되었습니다."
+        if gcs_ok:
+            msg += " (GCS metadata/ 동기화됨)"
+        elif not _is_railway_deploy():
+            msg += " (서버 로컬 output/metadata만; GCS 미설정 시 재배포 시 유실 가능)"
         return jsonify({"ok": True, "message": msg, "gcs_synced": gcs_ok})
 
 

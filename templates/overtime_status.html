@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <title>연장근무 현황 — NYJ Workforce Management</title>
+  <style>
+    @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px 16px 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #0f172a;
+      background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    }
+    .page { max-width: min(1700px, 99vw); margin: 0 auto; }
+    h1 { margin: 2px 0 6px; font-size: 1.9rem; font-weight: 700; letter-spacing: -0.02em; }
+    .sub { margin: 0 0 16px; color: #64748b; font-size: 0.9rem; line-height: 1.6; }
+    .card {
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      border-radius: 18px;
+      padding: 16px 14px;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+      overflow-x: auto;
+    }
+    .muted-card {
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px dashed #cbd5e1;
+      border-radius: 18px;
+      padding: 18px 16px;
+      color: #475569;
+      line-height: 1.6;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; min-width: 980px; }
+    th, td { padding: 8px 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    th {
+      color: #334155;
+      font-size: 0.73rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      background: #f8fafc;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    th.left-sticky, td.left-sticky {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      background: #ffffff;
+    }
+    th.left-sticky-2, td.left-sticky-2 {
+      position: sticky;
+      left: 138px;
+      z-index: 3;
+      background: #ffffff;
+    }
+    th.left-sticky { min-width: 138px; }
+    td.left-sticky { min-width: 138px; font-weight: 700; color: #1e293b; }
+    th.left-sticky-2, td.left-sticky-2 { min-width: 168px; }
+    td.left-sticky-2 { color: #334155; }
+    td.editable {
+      min-width: 82px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      background: #f8fafc;
+      outline: none;
+    }
+    td.readonly {
+      min-width: 82px;
+      text-align: right;
+      color: #334155;
+      font-variant-numeric: tabular-nums;
+      background: #ffffff;
+    }
+    td.editable:focus { background: #eef2ff; box-shadow: inset 0 0 0 2px #c7d2fe; }
+    .save-bar {
+      position: sticky;
+      bottom: 12px;
+      margin-top: 12px;
+      display: none;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      background: rgba(15, 23, 42, 0.88);
+      color: #f8fafc;
+      border-radius: 999px;
+      padding: 10px 14px;
+      box-shadow: 0 12px 28px rgba(2, 6, 23, 0.24);
+      z-index: 5;
+    }
+    .save-bar button {
+      border: none;
+      border-radius: 999px;
+      background: #2563eb;
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 0.84rem;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+    .save-bar button:hover { background: #1d4ed8; }
+    .save-bar .hint { font-size: 0.82rem; color: #dbeafe; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    {% include '_nav.html' %}
+    <h1>연장근무 현황</h1>
+    {% if overtime_ready %}
+    <p class="sub">
+      FM 기본정보의 <strong>역할 / 닉네임(이름)</strong> 조합으로 행을 만들고, 공개 급여 데이터의 날짜로 열을 자동 생성합니다.
+      {% if can_save %}
+      값을 수정하면 아래에 <strong>업로드 및 저장</strong> 버튼이 나타납니다.
+      {% else %}
+      이 화면은 조회 전용이며 저장은 관리자만 가능합니다.
+      {% endif %}
+    </p>
+    <section class="card">
+      <table id="overtimeTable">
+        <thead>
+          <tr>
+            <th class="left-sticky">역할</th>
+            <th class="left-sticky-2">닉네임(이름)</th>
+            {% for d in date_headers %}
+            <th>{{ d.label }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr data-role="{{ r.role }}" data-display-name="{{ r.display_name }}">
+            <td class="left-sticky">{{ r.role }}</td>
+            <td class="left-sticky-2">{{ r.display_name }}</td>
+            {% for d in date_keys %}
+            <td
+              class="{% if can_save %}editable{% else %}readonly{% endif %}"
+              data-date="{{ d }}"
+              {% if can_save %}contenteditable="true"{% endif %}
+            >{{ r[d] }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% if can_save %}
+    <div id="saveBar" class="save-bar">
+      <span id="saveHint" class="hint">테이블을 수정하면 저장할 수 있습니다.</span>
+      <button id="btnSave" type="button">업로드 및 저장</button>
+    </div>
+    {% endif %}
+    {% else %}
+    <section class="muted-card">
+      <p style="margin: 0 0 8px;"><strong>연장근무 현황</strong> 테이블을 만들 수 없습니다.</p>
+      <p style="margin: 0;">{{ overtime_error or "필수 데이터(FM 기본정보, 공개 급여 데이터)를 확인해 주세요." }}</p>
+    </section>
+    {% endif %}
+  </div>
+
+  {% if overtime_ready and can_save %}
+  <script>
+    (function() {
+      var saveUrl = {{ (save_url or "") | tojson }};
+      var table = document.getElementById("overtimeTable");
+      var saveBar = document.getElementById("saveBar");
+      var saveHint = document.getElementById("saveHint");
+      var btnSave = document.getElementById("btnSave");
+      if (!saveUrl || !table || !saveBar || !btnSave) return;
+
+      function parseEditableText(txt) {
+        if (!txt) return "";
+        var s = String(txt).trim().replace(/,/g, "");
+        if (!s) return "";
+        var n = Number(s);
+        if (Number.isNaN(n)) return null;
+        return String(n);
+      }
+
+      function collectRows() {
+        var out = [];
+        var trs = table.querySelectorAll("tbody tr");
+        trs.forEach(function(tr) {
+          var role = (tr.getAttribute("data-role") || "").trim();
+          var displayName = (tr.getAttribute("data-display-name") || "").trim();
+          if (!role || !displayName) return;
+          var row = { role: role, display_name: displayName };
+          tr.querySelectorAll("td[data-date]").forEach(function(td) {
+            var d = td.getAttribute("data-date");
+            var v = parseEditableText(td.textContent || "");
+            if (v === null) {
+              td.dataset.invalid = "1";
+            } else {
+              td.dataset.invalid = "";
+              row[d] = v;
+            }
+          });
+          out.push(row);
+        });
+        return out;
+      }
+
+      function hasInvalid() {
+        return !!table.querySelector('td[data-invalid="1"]');
+      }
+
+      var initial = JSON.stringify(collectRows());
+      function updateDirty() {
+        var now = JSON.stringify(collectRows());
+        var dirty = now !== initial;
+        saveBar.style.display = dirty ? "flex" : "none";
+        if (hasInvalid()) {
+          saveHint.textContent = "숫자만 입력 가능합니다.";
+        } else if (dirty) {
+          saveHint.textContent = "변경사항이 있습니다. 업로드 및 저장을 눌러 최신본으로 반영하세요.";
+        } else {
+          saveHint.textContent = "테이블을 수정하면 저장할 수 있습니다.";
+        }
+      }
+
+      table.addEventListener("input", updateDirty, true);
+      table.addEventListener("blur", updateDirty, true);
+      table.addEventListener("change", updateDirty, true);
+
+      btnSave.addEventListener("click", function() {
+        if (hasInvalid()) {
+          saveHint.textContent = "숫자 형식이 아닌 셀이 있습니다. 확인 후 다시 저장해 주세요.";
+          return;
+        }
+        var payload = { rows: collectRows() };
+        btnSave.disabled = true;
+        saveHint.textContent = "저장 중…";
+        fetch(saveUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(payload)
+        })
+          .then(function(r) {
+            return r.text().then(function(text) {
+              try {
+                return { ok: r.ok, data: JSON.parse(text) };
+              } catch (_) {
+                throw new Error("서버 응답 오류");
+              }
+            });
+          })
+          .then(function(res) {
+            btnSave.disabled = false;
+            if (res.data && res.data.ok) {
+              initial = JSON.stringify(collectRows());
+              saveBar.style.display = "none";
+              saveHint.textContent = "";
+              window.location.reload();
+            } else {
+              saveHint.textContent = (res.data && res.data.error) ? res.data.error : "저장 실패";
+            }
+          })
+          .catch(function(err) {
+            btnSave.disabled = false;
+            saveHint.textContent = err.message || "요청 실패";
+          });
+      });
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>
