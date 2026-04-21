@@ -171,13 +171,13 @@
     <section class="layout">
       <article class="card">
         <h2>일자별 인건비 추이</h2>
-        <p class="sub" style="margin: 0 0 10px; font-size: 0.85rem;">막대 <strong>파랑→초록</strong>은 출퇴근 기준 기본·야근 합계입니다. <strong style="color:#b91c1c;">붉은 막대·붉은 글씨</strong> 행만 해당 일(주휴일·일요일) <strong>주휴수당</strong> 합계입니다.</p>
+        <p class="sub" style="margin: 0 0 10px; font-size: 0.85rem;">막대 <strong>파랑→초록</strong>은 출퇴근 기준 기본·야근 합계입니다. <strong style="color:#b91c1c;">붉은 막대·붉은 글씨</strong>는 급여표의 <strong>주휴1</strong> 열과 같이, 앞뒤 날짜 사이에 끼인 주휴수당 합계입니다.</p>
         {% set mx = chart_max if chart_max else 1 %}
         <div class="trend-list">
           {% for row in chart_rows %}
           {% set v = row.amount %}
           <div class="trend-row{% if row.kind == 'weekly' %} is-weekly{% endif %}">
-            <div class="trend-date">{{ row.date_key }}</div>
+            <div class="trend-date">{{ row.display_label or row.date_key }}</div>
             <div class="bar-wrap"><div class="bar{% if row.kind == 'weekly' %} bar--weekly{% endif %}" style="width: {{ (v / mx * 100) if mx > 0 else 0 }}%"></div></div>
             <div class="trend-val">{{ "{:,}".format(v|int) }}</div>
           </div>

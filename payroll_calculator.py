@@ -111,6 +111,62 @@ def calc_daily(row, holiday_dates: set | None = None):
     return base_pay, ot_pay
 
 
+def build_payroll_column_order(
+    daily: pd.DataFrame, weekly: pd.DataFrame
+) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """
+    payroll_result.csv 가로 열 순서(평일 일자 … 주휴N …)와 동일.
+    반환: (cols_order, col_to_week) — col_to_week['주휴1'] = 해당 주 월요일 YYYY-MM-DD
+    """
+    daily = daily.copy()
+    daily["date"] = pd.to_datetime(daily["date"]).dt.normalize()
+    payroll_start, payroll_end = _infer_payroll_period(daily)
+    payroll_start_str = payroll_start.strftime("%Y-%m-%d")
+    all_dates = sorted(daily["date"].dt.strftime("%Y-%m-%d").unique())
+    if weekly is None or getattr(weekly, "empty", True) or "week_start" not in weekly.columns:
+        week_starts: list = []
+    else:
+        week_starts = sorted(weekly["week_start"].unique())
+    week_to_col = {ws: f"주휴{i+1}" for i, ws in enumerate(week_starts)}
+    weeks_in_period = {
+        ws for ws in week_starts
+        if payroll_start <= _week_sunday(ws) <= payroll_end
+    }
+    date_to_header = lambda d: f"{pd.to_datetime(d).month}/{pd.to_datetime(d).day}"
+
+    def header_for_date(d):
+        h = date_to_header(d)
+        return f"{h}\n주휴용" if d < payroll_start_str else h
+
+    def date_week_start(d):
+        dt = pd.to_datetime(d)
+        return (dt - pd.to_timedelta(dt.weekday(), unit="D")).strftime("%Y-%m-%d")
+
+    cols_order: list[tuple[str, str]] = []
+    if week_starts:
+        for ws in week_starts:
+            ws_str = pd.to_datetime(ws).strftime("%Y-%m-%d")
+            week_dates = [
+                d for d in all_dates
+                if date_week_start(d) == ws_str
+                and pd.to_datetime(d).weekday() <= 4
+            ]
+            for d in sorted(week_dates):
+                cols_order.append((d, header_for_date(d)))
+            if ws in weeks_in_period:
+                cols_order.append((week_to_col[ws], week_to_col[ws]))
+        seen = {k for k, _ in cols_order if len(k) == 10}
+        for d in all_dates:
+            if d not in seen and pd.to_datetime(d).weekday() <= 4:
+                cols_order.append((d, header_for_date(d)))
+    else:
+        for d in all_dates:
+            if pd.to_datetime(d).weekday() <= 4:
+                cols_order.append((d, header_for_date(d)))
+    col_to_week = {c: pd.to_datetime(ws).strftime("%Y-%m-%d") for ws, c in week_to_col.items()}
+    return cols_order, col_to_week
+
+
 def main(output_dir=None):
     out = Path(output_dir) if output_dir is not None else OUTPUT_DIR
     daily = pd.read_csv(out / "daily_summary.csv", encoding="utf-8-sig")

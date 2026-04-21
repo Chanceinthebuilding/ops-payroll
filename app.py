@@ -729,17 +729,18 @@ def _build_dashboard_context(output_dir: Path):
 
     # 주휴수당: weekly_allowance_result → 주휴일(일요일) 행으로 합산 (급여 산정기간 내 일요일만)
     wa_by_sunday: dict[str, float] = {}
+    wdf_for_order = pd.DataFrame()
     try:
         from payroll_calculator import HOURLY_WAGE, _infer_payroll_period, _week_sunday
 
         ps, pe = _infer_payroll_period(daily)
         wa_path = output_dir / "weekly_allowance_result.csv"
         if wa_path.exists():
-            wdf = pd.read_csv(wa_path, encoding="utf-8-sig")
-            wdf.columns = [str(c).strip().lstrip("\ufeff") for c in wdf.columns]
-            if "week_start" in wdf.columns and "weekly_allowance_minutes" in wdf.columns:
+            wdf_for_order = pd.read_csv(wa_path, encoding="utf-8-sig")
+            wdf_for_order.columns = [str(c).strip().lstrip("\ufeff") for c in wdf_for_order.columns]
+            if "week_start" in wdf_for_order.columns and "weekly_allowance_minutes" in wdf_for_order.columns:
                 tmp: dict[str, float] = {}
-                for _, wrow in wdf.iterrows():
+                for _, wrow in wdf_for_order.iterrows():
                     try:
                         sun = _week_sunday(wrow["week_start"])
                     except Exception:
@@ -756,15 +757,104 @@ def _build_dashboard_context(output_dir: Path):
     except Exception:
         logger.exception("dashboard: 주휴 일자별 집계 생략")
 
-    all_day_keys = sorted(set(work_by_date.keys()) | set(wa_by_sunday.keys()))
+    def _dash_fmt_md(dk: str) -> str:
+        d = pd.to_datetime(dk)
+        return f"{d.month:02d}/{d.day:02d}"
+
+    def _dash_weekly_bounds(cols_order: list, weekly_key: str) -> tuple[str | None, str | None]:
+        idx = next((i for i, (kk, _) in enumerate(cols_order) if kk == weekly_key), None)
+        if idx is None:
+            return None, None
+        prev_d = None
+        for i in range(idx - 1, -1, -1):
+            kk = cols_order[i][0]
+            if isinstance(kk, str) and len(kk) == 10 and kk[4] == "-" and kk[7] == "-":
+                prev_d = kk
+                break
+        next_d = None
+        for i in range(idx + 1, len(cols_order)):
+            kk = cols_order[i][0]
+            if isinstance(kk, str) and len(kk) == 10 and kk[4] == "-" and kk[7] == "-":
+                next_d = kk
+                break
+        return prev_d, next_d
+
+    def _dash_weekly_label(name: str, ws_mon: str, prev_d: str | None, next_d: str | None) -> str:
+        from datetime import timedelta
+
+        wdt = pd.to_datetime(ws_mon)
+        if prev_d is None:
+            prev_d = (wdt + timedelta(days=4)).strftime("%Y-%m-%d")
+        if next_d is None:
+            next_d = (wdt + timedelta(days=7)).strftime("%Y-%m-%d")
+        return f"{name} ({_dash_fmt_md(prev_d)}~{_dash_fmt_md(next_d)})"
+
     chart_rows: list[dict] = []
-    for dk in all_day_keys:
-        w_amt = work_by_date.get(dk, 0.0)
-        if w_amt > 0:
-            chart_rows.append({"date_key": dk, "amount": int(round(w_amt)), "kind": "work"})
-        wa_amt = wa_by_sunday.get(dk, 0.0)
-        if wa_amt > 0:
-            chart_rows.append({"date_key": dk, "amount": int(round(wa_amt)), "kind": "weekly"})
+    try:
+        from payroll_calculator import _week_sunday, build_payroll_column_order
+
+        wdf_cols = wdf_for_order
+        if wdf_cols.empty or "week_start" not in wdf_cols.columns:
+            wdf_cols = pd.DataFrame()
+        cols_order, col_to_week = build_payroll_column_order(daily, wdf_cols)
+        if cols_order:
+            seen_work: set[str] = set()
+            items: list[tuple[str, int, dict]] = []
+            for k, _h in cols_order:
+                kk = str(k)
+                if len(kk) == 10 and kk[4] == "-" and kk[7] == "-":
+                    w_amt = work_by_date.get(kk, 0.0)
+                    if w_amt > 0:
+                        items.append(
+                            (kk, 0, {"date_key": kk, "display_label": None, "amount": int(round(w_amt)), "kind": "work"})
+                        )
+                        seen_work.add(kk)
+                elif kk.startswith("주휴"):
+                    ws_mon = col_to_week.get(k)
+                    if not ws_mon:
+                        ws_mon = col_to_week.get(kk)
+                    if not ws_mon:
+                        continue
+                    sun = _week_sunday(ws_mon)
+                    sk = sun.isoformat() if hasattr(sun, "isoformat") else str(sun)
+                    wa_amt = wa_by_sunday.get(sk, 0.0)
+                    if wa_amt <= 0:
+                        continue
+                    p_d, n_d = _dash_weekly_bounds(cols_order, k)
+                    lbl = _dash_weekly_label(kk, ws_mon, p_d, n_d)
+                    sort_key = p_d if p_d else sk
+                    items.append(
+                        (
+                            sort_key,
+                            1,
+                            {"date_key": sk, "display_label": lbl, "amount": int(round(wa_amt)), "kind": "weekly"},
+                        )
+                    )
+            for dk in sorted(work_by_date.keys()):
+                if dk in seen_work:
+                    continue
+                w_amt = work_by_date.get(dk, 0.0)
+                if w_amt > 0:
+                    items.append((dk, 0, {"date_key": dk, "display_label": None, "amount": int(round(w_amt)), "kind": "work"}))
+            items.sort(key=lambda x: (x[0], x[1]))
+            chart_rows = [t[2] for t in items]
+    except Exception:
+        logger.exception("dashboard: 급여 열 순서 기반 일자별 추이 실패, 단순 정렬로 대체")
+        chart_rows = []
+
+    if not chart_rows:
+        all_day_keys = sorted(set(work_by_date.keys()) | set(wa_by_sunday.keys()))
+        for dk in all_day_keys:
+            w_amt = work_by_date.get(dk, 0.0)
+            if w_amt > 0:
+                chart_rows.append(
+                    {"date_key": dk, "display_label": None, "amount": int(round(w_amt)), "kind": "work"}
+                )
+            wa_amt = wa_by_sunday.get(dk, 0.0)
+            if wa_amt > 0:
+                chart_rows.append(
+                    {"date_key": dk, "display_label": None, "amount": int(round(wa_amt)), "kind": "weekly"}
+                )
     chart_max = max((r["amount"] for r in chart_rows), default=1)
 
     # 주간 트래킹(월요일 시작): 일자 합산(cost)을 week_start(월요일) 기준으로 재집계
