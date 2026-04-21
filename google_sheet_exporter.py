@@ -737,116 +737,130 @@ def create_google_sheet(
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
 
     json_raw = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON") or "").strip()
+    # JSON으로 인증할 때도 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)가 남아 있으면
+    # google-auth 등이 ADC로 그 경로를 읽으려다 컨테이너에서 PermissionError가 날 수 있음 → 임시 제거
+    _saved_gac_path = None
     if json_raw:
-        try:
-            info = json.loads(json_raw)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(
-                "GOOGLE_APPLICATION_CREDENTIALS_JSON 파싱에 실패했습니다. "
-                "Railway에는 서비스 계정 JSON 전체를 한 덩어리로 넣고, 앞뒤에 따옴표를 붙이지 마세요."
-            ) from e
-        if not isinstance(info, dict):
-            raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS_JSON은 JSON 객체여야 합니다.")
-        for key in ("type", "project_id", "private_key", "client_email"):
-            if not info.get(key):
-                raise RuntimeError(
-                    f"GOOGLE_APPLICATION_CREDENTIALS_JSON에 필수 필드 '{key}'가 없습니다. "
-                    "서비스 계정 키 JSON 전체를 복사했는지 확인하세요."
-                )
-        try:
-            creds = Credentials.from_service_account_info(info, scopes=scopes)
-        except Exception as e:
-            raise RuntimeError(
-                f"서비스 계정 자격 증명을 읽지 못했습니다 ({type(e).__name__}: {e}). "
-                "private_key가 잘리지 않았는지 확인하세요."
-            ) from e
-    else:
-        # 인증: env 파일 경로 → credentials/ → .keys/ops-robot-keys.json
-        # exists()만 쓰면 디렉터리 경로가 통과해 PermissionError가 날 수 있음 → is_file() 사용
-        cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not cred_path or not Path(cred_path).is_file():
-            for p in [
-                ROOT / "credentials" / "service_account.json",
-                ROOT / ".keys" / "ops-robot-keys.json",
-            ]:
-                if p.is_file():
-                    cred_path = str(p)
-                    break
+        _saved_gac_path = os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+
+    try:
+        with _google_api_safe_env():
+            if json_raw:
+                try:
+                    info = json.loads(json_raw)
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(
+                        "GOOGLE_APPLICATION_CREDENTIALS_JSON 파싱에 실패했습니다. "
+                        "Railway에는 서비스 계정 JSON 전체를 한 덩어리로 넣고, 앞뒤에 따옴표를 붙이지 마세요."
+                    ) from e
+                if not isinstance(info, dict):
+                    raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS_JSON은 JSON 객체여야 합니다.")
+                for key in ("type", "project_id", "private_key", "client_email"):
+                    if not info.get(key):
+                        raise RuntimeError(
+                            f"GOOGLE_APPLICATION_CREDENTIALS_JSON에 필수 필드 '{key}'가 없습니다. "
+                            "서비스 계정 키 JSON 전체를 복사했는지 확인하세요."
+                        )
+                try:
+                    creds = Credentials.from_service_account_info(info, scopes=scopes)
+                except PermissionError as e:
+                    fn = getattr(e, "filename", None)
+                    raise RuntimeError(
+                        f"자격 증명 처리 중 PermissionError{f': {fn}' if fn else ''}. "
+                        "GOOGLE_APPLICATION_CREDENTIALS(파일 경로) 변수는 Railway에서 삭제하세요."
+                    ) from e
+                except Exception as e:
+                    raise RuntimeError(
+                        f"서비스 계정 자격 증명을 읽지 못했습니다 ({type(e).__name__}: {e}). "
+                        "private_key가 잘리지 않았는지 확인하세요."
+                    ) from e
             else:
+                cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                if not cred_path or not Path(cred_path).is_file():
+                    for p in [
+                        ROOT / "credentials" / "service_account.json",
+                        ROOT / ".keys" / "ops-robot-keys.json",
+                    ]:
+                        if p.is_file():
+                            cred_path = str(p)
+                            break
+                    else:
+                        raise RuntimeError(
+                            "구글 시트 API 인증이 없습니다. "
+                            "Railway에는 GOOGLE_APPLICATION_CREDENTIALS_JSON에 서비스 계정 JSON 전체를 넣으세요. "
+                            "로컬 경로용 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 Railway에서 제거하거나 비우세요."
+                        )
+                try:
+                    creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
+                except PermissionError as e:
+                    fn = getattr(e, "filename", None) or cred_path
+                    raise RuntimeError(
+                        f"키 파일을 읽을 수 없습니다(PermissionError): {fn}. "
+                        "Railway에서는 GOOGLE_APPLICATION_CREDENTIALS_JSON만 사용하고, "
+                        "GOOGLE_APPLICATION_CREDENTIALS에 Windows 경로 등 읽기 불가 경로가 들어가 있지 않은지 확인하세요."
+                    ) from e
+
+            try:
+                gc = gspread.authorize(creds)
+                sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
+            except PermissionError as e:
+                fn = getattr(e, "filename", None)
                 raise RuntimeError(
-                    "구글 시트 API 인증이 없습니다. "
-                    "Railway에는 GOOGLE_APPLICATION_CREDENTIALS_JSON에 서비스 계정 JSON 전체를 넣으세요. "
-                    "로컬 경로용 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 Railway에서 제거하거나 비우세요."
+                    f"구글 시트 접근 PermissionError{f': {fn}' if fn else ''}. "
+                    "Railway Variables에서 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)를 삭제하고 "
+                    "GOOGLE_APPLICATION_CREDENTIALS_JSON만 두세요(둘 다 있으면 일부 라이브러리가 경로를 읽으려다 실패할 수 있음)."
+                ) from e
+            except Exception as e:
+                hint = (
+                    f"구글 시트 API 오류 ({type(e).__name__}): {e}. "
+                    "① GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체) "
+                    "② client_email을 스프레드시트에 편집자로 공유 "
+                    "③ Google Cloud에서 'Google Sheets API' 사용 설정"
                 )
-        try:
-            creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
-        except PermissionError as e:
-            fn = getattr(e, "filename", None) or cred_path
-            raise RuntimeError(
-                f"키 파일을 읽을 수 없습니다(PermissionError): {fn}. "
-                "Railway에서는 GOOGLE_APPLICATION_CREDENTIALS_JSON만 사용하고, "
-                "GOOGLE_APPLICATION_CREDENTIALS에 Windows 경로(C:\\...)나 읽기 불가 경로가 들어가 있지 않은지 확인하세요."
-            ) from e
-    with _google_api_safe_env():
-        try:
-            gc = gspread.authorize(creds)
-            sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
-        except PermissionError as e:
-            fn = getattr(e, "filename", None)
-            raise RuntimeError(
-                f"파일 접근이 거부되었습니다(PermissionError){f': {fn}' if fn else ''}. "
-                "GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 Railway에서 제거하고 "
-                "GOOGLE_APPLICATION_CREDENTIALS_JSON만 사용하세요. "
-                "문제가 계속되면 배포 로그에 전체 스택을 확인하세요."
-            ) from e
-        except Exception as e:
-            hint = (
-                f"구글 시트 API 오류 ({type(e).__name__}): {e}. "
-                "① GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체) "
-                "② client_email을 스프레드시트에 편집자로 공유 "
-                "③ Google Cloud에서 'Google Sheets API' 사용 설정"
-            )
-            raise RuntimeError(hint) from e
+                raise RuntimeError(hint) from e
 
-        # payroll_result 원본 시트 (화면에서 수정 반영된 데이터 그대로 반출)
-        sheet_title_payroll = f"{payroll_year}년{payroll_month:02d}월_payroll_result"
-        payroll_header = [str(c) for c in payroll.columns]
-        payroll_data_rows = []
-        for _, r in payroll.iterrows():
-            payroll_data_rows.append(
-                [r[c] if c in r.index and pd.notna(r[c]) else "" for c in payroll.columns]
-            )
-        data_payroll_result = [payroll_header] + payroll_data_rows
-        rows_p = max(len(data_payroll_result) + 10, 100)
-        cols_p = max(len(payroll_header), 20)
-        ws_payroll = sh.add_worksheet(title=sheet_title_payroll, rows=rows_p, cols=cols_p)
-        ws_payroll.update("A1", data_payroll_result, value_input_option="USER_ENTERED")
+            # payroll_result 원본 시트 (화면에서 수정 반영된 데이터 그대로 반출)
+            sheet_title_payroll = f"{payroll_year}년{payroll_month:02d}월_payroll_result"
+            payroll_header = [str(c) for c in payroll.columns]
+            payroll_data_rows = []
+            for _, r in payroll.iterrows():
+                payroll_data_rows.append(
+                    [r[c] if c in r.index and pd.notna(r[c]) else "" for c in payroll.columns]
+                )
+            data_payroll_result = [payroll_header] + payroll_data_rows
+            rows_p = max(len(data_payroll_result) + 10, 100)
+            cols_p = max(len(payroll_header), 20)
+            ws_payroll = sh.add_worksheet(title=sheet_title_payroll, rows=rows_p, cols=cols_p)
+            ws_payroll.update("A1", data_payroll_result, value_input_option="USER_ENTERED")
 
-        # 상용직 시트 생성
-        rows_count = max(len(data_regular) + 10, 100)
-        cols_count = max(len(data_regular[0]) if data_regular else 50, 50)
-        ws_regular = sh.add_worksheet(title=sheet_title_regular, rows=rows_count, cols=cols_count)
-        ws_regular.update("A1", data_regular, value_input_option="USER_ENTERED")
+            # 상용직 시트 생성
+            rows_count = max(len(data_regular) + 10, 100)
+            cols_count = max(len(data_regular[0]) if data_regular else 50, 50)
+            ws_regular = sh.add_worksheet(title=sheet_title_regular, rows=rows_count, cols=cols_count)
+            ws_regular.update("A1", data_regular, value_input_option="USER_ENTERED")
 
-        # 정규직 시트 생성 (상용직과 동일 형식)
-        rows_j = max(len(data_정규직) + 10, 100)
-        cols_j = max(len(data_정규직[0]) if data_정규직 else 50, 50)
-        ws_정규직 = sh.add_worksheet(title=sheet_title_정규직, rows=rows_j, cols=cols_j)
-        ws_정규직.update("A1", data_정규직, value_input_option="USER_ENTERED")
+            # 정규직 시트 생성 (상용직과 동일 형식)
+            rows_j = max(len(data_정규직) + 10, 100)
+            cols_j = max(len(data_정규직[0]) if data_정규직 else 50, 50)
+            ws_정규직 = sh.add_worksheet(title=sheet_title_정규직, rows=rows_j, cols=cols_j)
+            ws_정규직.update("A1", data_정규직, value_input_option="USER_ENTERED")
 
-        # 프리랜스 시트 생성 (닉네임, 성명, 주민등록번호, 세전)
-        rows_f = max(len(data_freelance) + 10, 50)
-        cols_f = max(len(data_freelance[0]) if data_freelance else 4, 4)
-        ws_freelance = sh.add_worksheet(title=sheet_title_freelance, rows=rows_f, cols=cols_f)
-        ws_freelance.update("A1", data_freelance, value_input_option="USER_ENTERED")
+            # 프리랜스 시트 생성 (닉네임, 성명, 주민등록번호, 세전)
+            rows_f = max(len(data_freelance) + 10, 50)
+            cols_f = max(len(data_freelance[0]) if data_freelance else 4, 4)
+            ws_freelance = sh.add_worksheet(title=sheet_title_freelance, rows=rows_f, cols=cols_f)
+            ws_freelance.update("A1", data_freelance, value_input_option="USER_ENTERED")
 
-        # 이메일_발송용_정보 시트 생성
-        sheet_title_email = f"{payroll_year}년{payroll_month:02d}월_이메일_발송용_정보"
-        rows_e = max(len(data_email) + 10, 50)
-        cols_e = max(len(data_email[0]) if data_email else 11, 11)
-        ws_email = sh.add_worksheet(title=sheet_title_email, rows=rows_e, cols=cols_e)
-        ws_email.update("A1", data_email, value_input_option="USER_ENTERED")
+            # 이메일_발송용_정보 시트 생성
+            sheet_title_email = f"{payroll_year}년{payroll_month:02d}월_이메일_발송용_정보"
+            rows_e = max(len(data_email) + 10, 50)
+            cols_e = max(len(data_email[0]) if data_email else 11, 11)
+            ws_email = sh.add_worksheet(title=sheet_title_email, rows=rows_e, cols=cols_e)
+            ws_email.update("A1", data_email, value_input_option="USER_ENTERED")
 
-        # 상용직 시트로 이동하는 URL
-        url = f"https://docs.google.com/spreadsheets/d/{TARGET_SPREADSHEET_ID}/edit#gid={ws_regular.id}"
-        return url
+            # 상용직 시트로 이동하는 URL
+            url = f"https://docs.google.com/spreadsheets/d/{TARGET_SPREADSHEET_ID}/edit#gid={ws_regular.id}"
+            return url
+    finally:
+        if _saved_gac_path is not None:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _saved_gac_path
