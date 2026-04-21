@@ -842,8 +842,8 @@ def _build_dashboard_context(output_dir: Path):
         logger.exception("dashboard: 급여 열 순서 기반 일자별 추이 실패, 단순 정렬로 대체")
         chart_rows = []
 
+    all_day_keys = sorted(set(work_by_date.keys()) | set(wa_by_sunday.keys()))
     if not chart_rows:
-        all_day_keys = sorted(set(work_by_date.keys()) | set(wa_by_sunday.keys()))
         for dk in all_day_keys:
             w_amt = work_by_date.get(dk, 0.0)
             if w_amt > 0:
