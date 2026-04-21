@@ -620,6 +620,22 @@ def _build_dashboard_context(output_dir: Path):
     if daily.empty:
         return {"dashboard_ready": False}
 
+    # 급여 화면의 '주휴용'(산정기간 이전) 일자는 참고용이므로, 인건비 대시보드 일자·근무시간 집계에서 제외
+    payroll_period_start = ""
+    payroll_period_end = ""
+    try:
+        from payroll_calculator import _infer_payroll_period
+
+        ps, pe = _infer_payroll_period(daily)
+        payroll_period_start = ps.isoformat()
+        payroll_period_end = pe.isoformat()
+        dpart = daily["date"].dt.normalize().dt.date
+        daily = daily.loc[(dpart >= ps) & (dpart <= pe)].copy()
+    except Exception:
+        logger.exception("dashboard: 급여 산정기간 필터 생략(전체 daily 사용)")
+    if daily.empty:
+        return {"dashboard_ready": False}
+
     holiday_dates = set()
     try:
         from leave_merger import get_weekday_public_holidays_kr
@@ -761,6 +777,8 @@ def _build_dashboard_context(output_dir: Path):
         "kpi_total_employees": total_employees,
         "kpi_total_work_hours": total_work_hours,
         "kpi_anomaly_count": anomaly_count,
+        "payroll_period_start": payroll_period_start,
+        "payroll_period_end": payroll_period_end,
         "period_start": first_date,
         "period_end": last_date,
         "chart_labels": chart_labels,

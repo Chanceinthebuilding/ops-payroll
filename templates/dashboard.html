@@ -96,6 +96,12 @@
     <h1>인건비 대시보드</h1>
     {% if dashboard_ready %}
     <p class="sub">공개 데이터 기준 집계 기간: <strong>{{ period_start }}</strong> ~ <strong>{{ period_end }}</strong></p>
+    {% if payroll_period_start and payroll_period_end %}
+    <p class="sub" style="margin-top: -10px;">
+      일자·근무시간 기반 차트와 근태 비용 순위는 <strong>급여 산정기간</strong>(<strong>{{ payroll_period_start }}</strong> ~ <strong>{{ payroll_period_end }}</strong>) 안의 출퇴근만 집계합니다.
+      급여 데이터 화면에서 <strong>주휴용</strong>(산정기간 이전)으로만 쓰는 일자는 인건비 대시보드 계산에서 제외됩니다.
+    </p>
+    {% endif %}
 
     <section class="grid-kpi">
       <article class="kpi">
