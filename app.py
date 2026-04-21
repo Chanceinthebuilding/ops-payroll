@@ -514,14 +514,51 @@ def _fm_person_name_compact(val) -> str:
     return "".join(n.split()) if n else ""
 
 
+def _payroll_display_name_keys(raw) -> list[str]:
+    """
+    급여 employee_name 후보 키 목록.
+    예: '골드(김은영)' → 전체, 무공백, 괄호 앞 '골드', 괄호 안 '김은영' (FM 닉네임·이름과 맞추기 위함).
+    """
+    import re
+
+    n = _normalize_fm_person_name(raw)
+    if not n:
+        return []
+    keys: list[str] = [n]
+    c = "".join(n.split())
+    if c and c != n:
+        keys.append(c)
+    m = re.match(r"^(.+?)\s*[\(（]\s*([^)）]+)\s*[\)）]\s*$", n)
+    if m:
+        outer = m.group(1).strip()
+        inner = m.group(2).strip()
+        for p in (outer, inner):
+            if not p:
+                continue
+            keys.append(p)
+            pc = "".join(p.split())
+            if pc and pc != p:
+                keys.append(pc)
+    out: list[str] = []
+    seen: set[str] = set()
+    for k in keys:
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def _fm_name_role_lookup(name_val, fm_name_to_role: dict[str, str]) -> str | None:
-    """급여 이름으로 FM 역할 조회. 정규화·무공백 키 순."""
-    n = _normalize_fm_person_name(name_val)
-    if n and n in fm_name_to_role:
-        return fm_name_to_role[n]
-    c = _fm_person_name_compact(name_val)
-    if c and c in fm_name_to_role:
-        return fm_name_to_role[c]
+    """급여 이름으로 FM 역할 조회. 표시명·괄호 분리·닉네임·정규화 키 순."""
+    for key in _payroll_display_name_keys(name_val):
+        if key in fm_name_to_role:
+            return fm_name_to_role[key]
+        nk = _normalize_fm_person_name(key)
+        if nk and nk in fm_name_to_role:
+            return fm_name_to_role[nk]
+        ck = "".join(nk.split()) if nk else ""
+        if ck and ck in fm_name_to_role:
+            return fm_name_to_role[ck]
     return None
 
 
@@ -542,6 +579,7 @@ def _load_fm_roster_data(path: Path):
     FM 목록 xlsx → (사번→역할 DataFrame, 이름→역할 dict).
     - 사번이 있는 행만 eid 테이블에 포함(기존과 동일).
     - 이름 컬럼이 있으면 **모든 행**에서 이름→역할을 등록(사번이 급여와 안 맞아도 이름으로 보조 매칭).
+    - 닉네임 컬럼이 있으면 닉네임→역할도 등록(급여명이 '골드(김은영)' 형태일 때 괄호 앞과 맞춤).
     이름 컬럼 후보: 이름, 성명, 직원명, 한글명
     """
     import pandas as pd
@@ -577,6 +615,13 @@ def _load_fm_roster_data(path: Path):
             if not role:
                 continue
             _fm_name_to_role_dict_add(name_to_role, row.get(name_col), role)
+
+    if "닉네임" in df.columns:
+        for _, row in df.iterrows():
+            role = str(row.get("역할", "")).strip()
+            if not role:
+                continue
+            _fm_name_to_role_dict_add(name_to_role, row.get("닉네임"), role)
 
     if out.empty and not name_to_role:
         return None

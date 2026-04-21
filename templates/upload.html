@@ -178,7 +178,7 @@
 
       <h2 style="margin: 0 0 8px; font-size: 1.15rem; font-weight: 700; color: #0f172a;">FM 기본정보 (선택)</h2>
       <p class="sub" style="margin-bottom: 8px;">
-        대시보드에서 <strong>역할(팀)별 급여 집계</strong>에 씁니다. 시트 첫 행에 <code>사번</code>, <code>역할</code>이 필수이고, 사번이 없는 행은 <code>이름</code> 또는 <code>성명</code>으로 급여표의 이름과 맞추면 역할이 붙습니다.
+        대시보드에서 <strong>역할(팀)별 급여 집계</strong>에 씁니다. 시트 첫 행에 <code>사번</code>, <code>역할</code>이 필수이고, 사번이 없는 행은 <code>이름</code>·<code>성명</code> 또는 <code>닉네임</code>(급여명이 <code>닉네임(실명)</code> 형태일 때)으로 맞추면 역할이 붙습니다.
         {% if fm_roster_on_disk %}<span style="color:#059669;font-weight:600;">현재 등록됨.</span>{% else %}아직 없음.{% endif %}
       </p>
         <p class="upload-meta-line">마지막 반영: <strong>{{ upload_last_fm.filename }}</strong> · {{ upload_last_fm.when }}</p>
