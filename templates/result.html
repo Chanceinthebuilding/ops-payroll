@@ -853,17 +853,23 @@
         fetch(exportUrl, fetchOptions)
           .then(function(r) {
             return r.text().then(function(text) {
+              var parsed = null;
               try {
-                return { ok: r.ok, data: JSON.parse(text) };
+                parsed = JSON.parse(text);
               } catch (_) {
-                throw new Error('서버 오류(' + r.status + '). 응답이 JSON이 아닙니다. 터미널/콘솔 로그를 확인하세요.');
+                var preview = (text || '').replace(/\s+/g, ' ').slice(0, 240);
+                throw new Error(
+                  '서버 오류 HTTP ' + r.status + '. JSON이 아닙니다. ' +
+                  (preview ? ('응답 앞부분: ' + preview) : '')
+                );
               }
+              return { httpOk: r.ok, httpStatus: r.status, data: parsed };
             });
           })
           .then(function(res) {
             btnOk.disabled = false;
-            var data = res.data;
-            if (data.ok) {
+            var data = res.data || {};
+            if (res.httpOk && data.ok) {
               showMsg('성공! ', false);
               var a = document.createElement('a');
               a.href = data.url;
@@ -872,7 +878,13 @@
               msg.appendChild(a);
               msg.appendChild(document.createTextNode(' 에서 확인하세요.'));
             } else {
-              showMsg(data.error || '내보내기 실패', true);
+              var err =
+                (data && (data.error || data.message || data.detail)) ||
+                ('HTTP ' + res.httpStatus + (data && data.ok === false ? ' (ok:false)' : ''));
+              if (!err || String(err).trim() === '') {
+                err = '보내기 실패(서버 메시지 없음). Railway Variables에 GOOGLE_APPLICATION_CREDENTIALS_JSON을 넣었는지 확인하세요.';
+              }
+              showMsg(String(err), true);
             }
           })
           .catch(function(err) {
