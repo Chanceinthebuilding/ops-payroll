@@ -36,7 +36,7 @@
       line-height: 1.6;
     }
     table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.78rem; min-width: 1080px; }
-    th, td { padding: 4px 5px; border-right: 1px solid #b8c2d4; border-bottom: 1px solid #b8c2d4; text-align: left; }
+    th, td { padding: 4px 5px; border-right: 1px solid #b8c2d4; border-bottom: 1px solid #b8c2d4; text-align: center; }
     th {
       color: #334155;
       font-size: 0.7rem;
@@ -49,7 +49,6 @@
       z-index: 4;
     }
     thead tr:nth-child(1) th { top: 0; z-index: 8; }
-    thead tr:nth-child(2) th { top: 24px; z-index: 8; }
     th:first-child, td:first-child { border-left: 1px solid #d1d9e6; }
     thead tr:first-child th { border-top: 1px solid #d1d9e6; }
     th.left-sticky, td.left-sticky {
@@ -70,7 +69,6 @@
     td.left-sticky-2 { color: #334155; }
     .weekday-head { background: #f8fafc; }
     .weekend-head { background: #fdf2e3; }
-    .dow-head { font-size: 0.65rem; color: #64748b; }
     td.editable {
       min-width: 50px;
       text-align: right;
@@ -97,6 +95,7 @@
       font-weight: 700;
     }
     td.editable:focus { background: #eef2ff; box-shadow: inset 0 0 0 2px #c7d2fe; }
+    td.cell-has-value { background: #dcfce7 !important; color: #14532d; font-weight: 700; }
     .save-bar {
       position: sticky;
       bottom: 12px;
@@ -185,6 +184,33 @@
       background: #eef2ff;
       color: #3730a3;
     }
+    .month-form {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid #dbe3ef;
+      border-radius: 12px;
+      background: #fff;
+      margin: 0 0 10px;
+      font-size: 0.82rem;
+    }
+    .month-form input[type="month"] {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 5px 8px;
+      font-size: 0.82rem;
+    }
+    .month-form button {
+      border: 1px solid #bfdbfe;
+      background: #2563eb;
+      color: #fff;
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -200,6 +226,12 @@
       이 화면은 조회 전용이며 저장은 관리자만 가능합니다.
       {% endif %}
     </p>
+    <form class="month-form" method="get" action="{{ url_for('overtime_status') }}">
+      <strong>근로월</strong>
+      <input type="month" name="work_month" value="{{ work_month }}" required>
+      <button type="submit">적용</button>
+      <span style="color:#64748b;">산정기간: {{ period_start }} ~ {{ period_end }}</span>
+    </form>
     <section class="card">
       <table id="overtimeTable">
         <thead>
@@ -210,14 +242,6 @@
             <th class="{% if d.is_weekend %}weekend-head{% else %}weekday-head{% endif %}" data-date-key="{{ d.key }}">{{ d.label }}</th>
             {% endfor %}
             <th class="row-total-head">근무시간</th>
-          </tr>
-          <tr>
-            <th class="left-sticky dow-head">구분</th>
-            <th class="left-sticky-2 dow-head">인원</th>
-            {% for d in date_headers %}
-            <th class="dow-head {% if d.is_weekend %}weekend-head{% else %}weekday-head{% endif %}" data-date-key="{{ d.key }}">{{ d.dow }}</th>
-            {% endfor %}
-            <th class="row-total-head dow-head">합계</th>
           </tr>
         </thead>
         <tbody>
@@ -261,6 +285,7 @@
   <script>
     (function() {
       var saveUrl = {{ (save_url or "") | tojson }};
+      var workMonth = {{ (work_month or "") | tojson }};
       var canSave = {{ "true" if can_save else "false" }};
       var table = document.getElementById("overtimeTable");
       var saveBar = document.getElementById("saveBar");
@@ -348,6 +373,17 @@
         });
       }
 
+      function refreshValueColors() {
+        table.querySelectorAll("td[data-date]").forEach(function(td) {
+          var v = parseEditableText(td.textContent || "");
+          if (v !== null && v !== "" && Number(v) !== 0) {
+            td.classList.add("cell-has-value");
+          } else {
+            td.classList.remove("cell-has-value");
+          }
+        });
+      }
+
       function roleClass(role) {
         var r = String(role || "").toLowerCase();
         if (r.indexOf("태깅") >= 0 || r.indexOf("tag") >= 0) return "tagging";
@@ -414,7 +450,7 @@
           dateKeys.forEach(function(d) {
             var td = document.createElement("td");
             td.textContent = String((bucket.byDate[d] || 0));
-            td.style.textAlign = "right";
+            td.style.textAlign = "center";
             tr.appendChild(td);
           });
           var tdLast = document.createElement("td");
@@ -488,19 +524,22 @@
       decorateRoleTags();
       bindCellToast();
       redrawSummary();
+      refreshValueColors();
       if (!canSave || !saveUrl || !saveBar || !saveHint || !btnSave) return;
       table.addEventListener("input", updateDirty, true);
       table.addEventListener("blur", updateDirty, true);
       table.addEventListener("change", updateDirty, true);
       table.addEventListener("input", redrawSummary, true);
       table.addEventListener("change", redrawSummary, true);
+      table.addEventListener("input", refreshValueColors, true);
+      table.addEventListener("change", refreshValueColors, true);
 
       btnSave.addEventListener("click", function() {
         if (hasInvalid()) {
           saveHint.textContent = "숫자 형식이 아닌 셀이 있습니다. 확인 후 다시 저장해 주세요.";
           return;
         }
-        var payload = { rows: collectRows() };
+        var payload = { rows: collectRows(), work_month: workMonth };
         btnSave.disabled = true;
         saveHint.textContent = "저장 중…";
         fetch(saveUrl, {

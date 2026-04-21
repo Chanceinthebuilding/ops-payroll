@@ -9,7 +9,7 @@ import shutil
 import sys
 import tempfile
 import yaml
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -370,15 +370,95 @@ def _attach_overtime_status_to_dir(target_dir: Path) -> bool:
     return False
 
 
-def _overtime_date_keys_from_published_dir(output_dir: Path) -> list[str]:
+def _default_work_month_from_published_dir(output_dir: Path) -> str:
+    """공개 급여 데이터에서 기본 근로월(YYYY-MM)을 추정한다."""
     import pandas as pd
 
     daily = _safe_read_csv(output_dir / "daily_summary.csv")
     if daily.empty or "date" not in daily.columns:
-        return []
+        return datetime.now(KST).strftime("%Y-%m")
     ds = pd.to_datetime(daily["date"], errors="coerce")
-    keys = sorted({d.strftime("%Y-%m-%d") for d in ds.dropna()})
-    return keys
+    ds = ds.dropna()
+    if ds.empty:
+        return datetime.now(KST).strftime("%Y-%m")
+    try:
+        from payroll_calculator import _infer_payroll_period
+
+        ps, pe = _infer_payroll_period(pd.DataFrame({"date": ds}))
+        return pe.strftime("%Y-%m")
+    except Exception:
+        pass
+    return ds.max().strftime("%Y-%m")
+
+
+def _normalize_work_month(raw: str | None, fallback: str) -> str:
+    s = (raw or "").strip()
+    if len(s) == 7 and s[4] == "-":
+        try:
+            y = int(s[:4])
+            m = int(s[5:7])
+            if 1 <= m <= 12 and 2000 <= y <= 2100:
+                return f"{y:04d}-{m:02d}"
+        except ValueError:
+            pass
+    return fallback
+
+
+def _work_month_date_keys(work_month_key: str) -> list[str]:
+    """근로월 기준 31일 시퀀스: 전월 25일부터 31일."""
+    y = int(work_month_key[:4])
+    m = int(work_month_key[5:7])
+    start_month = m - 1
+    start_year = y
+    if start_month <= 0:
+        start_month = 12
+        start_year -= 1
+    start = date(start_year, start_month, 25)
+    return [(start + timedelta(days=i)).isoformat() for i in range(31)]
+
+
+def _load_overtime_long_map(path: Path, work_month_key: str) -> dict[str, dict]:
+    """CSV(long format)에서 선택 근로월 데이터를 row-key 맵으로 로드."""
+    import pandas as pd
+
+    saved_map: dict[str, dict] = {}
+    saved = _safe_read_csv(path)
+    if saved.empty:
+        return saved_map
+    saved.columns = [str(c).strip().lstrip("\ufeff") for c in saved.columns]
+
+    # 최신 long 포맷: work_month, role, display_name, date, value
+    long_cols = {"work_month", "role", "display_name", "date", "value"}
+    if long_cols.issubset(set(saved.columns)):
+        s = saved[saved["work_month"].astype(str).str.strip() == work_month_key]
+        for _, r in s.iterrows():
+            role = str(r.get("role", "")).strip()
+            display_name = str(r.get("display_name", "")).strip()
+            d = str(r.get("date", "")).strip()[:10]
+            if not role or not display_name or not d:
+                continue
+            row_key = f"{role}|{display_name}"
+            saved_map.setdefault(row_key, {})[d] = str(r.get("value", "")).strip()
+        return saved_map
+
+    # 구버전 wide 포맷(role/display_name + date columns) 호환: fallback 근로월에만 표시
+    if "role" in saved.columns and "display_name" in saved.columns:
+        date_keys = _work_month_date_keys(work_month_key)
+        for _, r in saved.iterrows():
+            role = str(r.get("role", "")).strip()
+            display_name = str(r.get("display_name", "")).strip()
+            if not role or not display_name:
+                continue
+            row_key = f"{role}|{display_name}"
+            row_data = {}
+            for d in date_keys:
+                v = r.get(d, "")
+                if v is None or (isinstance(v, float) and pd.isna(v)):
+                    row_data[d] = ""
+                else:
+                    row_data[d] = str(v).strip()
+            saved_map[row_key] = row_data
+    return saved_map
 
 
 def _load_fm_role_name_rows(path: Path) -> list[dict]:
@@ -436,35 +516,15 @@ def _load_fm_role_name_rows(path: Path) -> list[dict]:
     return rows
 
 
-def _build_overtime_status_table(output_dir: Path) -> tuple[list[dict], list[str], bool]:
+def _build_overtime_status_table(output_dir: Path, work_month_key: str) -> tuple[list[dict], list[str], bool]:
     """
     연장근무 현황 테이블 행/일자컬럼 생성.
     반환: (rows, date_keys, has_saved_file)
     """
-    import pandas as pd
-
-    date_keys = _overtime_date_keys_from_published_dir(output_dir)
+    date_keys = _work_month_date_keys(work_month_key)
     roster_rows = _load_fm_role_name_rows(output_dir / FM_ROSTER_FILENAME)
     has_saved = _attach_overtime_status_to_dir(output_dir)
-
-    saved_map: dict[str, dict] = {}
-    saved = _safe_read_csv(output_dir / OVERTIME_STATUS_FILENAME)
-    if not saved.empty:
-        saved.columns = [str(c).strip().lstrip("\ufeff") for c in saved.columns]
-        for _, r in saved.iterrows():
-            role = str(r.get("role", "")).strip()
-            display_name = str(r.get("display_name", "")).strip()
-            if not role or not display_name:
-                continue
-            key = f"{role}|{display_name}"
-            row_data = {}
-            for d in date_keys:
-                v = r.get(d, "")
-                if v is None or (isinstance(v, float) and pd.isna(v)):
-                    row_data[d] = ""
-                else:
-                    row_data[d] = str(v).strip()
-            saved_map[key] = row_data
+    saved_map = _load_overtime_long_map(output_dir / OVERTIME_STATUS_FILENAME, work_month_key)
 
     rows: list[dict] = []
     for r in roster_rows:
@@ -1162,7 +1222,9 @@ def overtime_status():
                 has_saved=False,
             )
         _attach_fm_roster_to_dir(tmp_dir)
-        rows, date_keys, has_saved = _build_overtime_status_table(tmp_dir)
+        default_month = _default_work_month_from_published_dir(tmp_dir)
+        work_month = _normalize_work_month(request.args.get("work_month"), default_month)
+        rows, date_keys, has_saved = _build_overtime_status_table(tmp_dir, work_month)
         if not date_keys:
             return render_template(
                 "overtime_status.html",
@@ -1187,10 +1249,12 @@ def overtime_status():
                 save_url=None,
                 has_saved=has_saved,
             )
+        period_start = date_keys[0]
+        period_end = date_keys[-1]
         date_headers = [
             {
                 "key": d,
-                "label": f"{int(d[5:7])}/{int(d[8:10])}",
+                "label": f"{int(d[5:7]):02d}.{int(d[8:10]):02d}({('월', '화', '수', '목', '금', '토', '일')[datetime.fromisoformat(d).weekday()]})",
                 "dow": ("월", "화", "수", "목", "금", "토", "일")[datetime.fromisoformat(d).weekday()],
                 "is_weekend": datetime.fromisoformat(d).weekday() >= 5,
             }
@@ -1204,6 +1268,9 @@ def overtime_status():
             date_keys=date_keys,
             date_headers=date_headers,
             rows=rows,
+            work_month=work_month,
+            period_start=period_start,
+            period_end=period_end,
             can_save=can_save,
             save_url=(url_for("save_overtime_status") if can_save else None),
             has_saved=has_saved,
@@ -1869,6 +1936,7 @@ def save_overtime_status():
 
     data = request.get_json(silent=True) or {}
     rows_in = data.get("rows")
+    work_month = _normalize_work_month(data.get("work_month"), datetime.now(KST).strftime("%Y-%m"))
     if not isinstance(rows_in, list) or not rows_in:
         return jsonify({"ok": False, "error": "저장할 테이블 데이터(rows)가 없습니다."}), 400
 
@@ -1885,7 +1953,7 @@ def save_overtime_status():
         roster_rows = _load_fm_role_name_rows(tmp_dir / FM_ROSTER_FILENAME)
         if not roster_rows:
             return jsonify({"ok": False, "error": "FM 기본정보(역할/닉네임(이름))를 확인해 주세요."}), 400
-        date_keys = _overtime_date_keys_from_published_dir(tmp_dir)
+        date_keys = _work_month_date_keys(work_month)
         if not date_keys:
             return jsonify({"ok": False, "error": "급여 데이터에서 일자를 만들 수 없습니다."}), 400
 
@@ -1925,7 +1993,46 @@ def save_overtime_status():
                 out[d] = vals.get(d, "")
             out_rows.append(out)
 
-        save_df = pd.DataFrame(out_rows, columns=["role", "display_name"] + date_keys)
+        # long 포맷으로 월별 누적 저장: work_month, role, display_name, date, value
+        existing_long = _safe_read_csv(tmp_dir / OVERTIME_STATUS_FILENAME)
+        if not existing_long.empty:
+            existing_long.columns = [str(c).strip().lstrip("\ufeff") for c in existing_long.columns]
+            need_cols = {"work_month", "role", "display_name", "date", "value"}
+            if not need_cols.issubset(set(existing_long.columns)):
+                # 구버전 wide 포맷은 migration하지 않고 이번 저장월부터 long 누적 시작
+                existing_long = pd.DataFrame(columns=["work_month", "role", "display_name", "date", "value"])
+            else:
+                existing_long = existing_long[["work_month", "role", "display_name", "date", "value"]].copy()
+        else:
+            existing_long = pd.DataFrame(columns=["work_month", "role", "display_name", "date", "value"])
+
+        if not existing_long.empty:
+            wm = existing_long["work_month"].astype(str).str.strip()
+            existing_long = existing_long[wm != work_month].copy()
+
+        new_long_rows = []
+        for row in out_rows:
+            role = row.get("role", "")
+            display_name = row.get("display_name", "")
+            for d in date_keys:
+                v = str(row.get(d, "")).strip()
+                if not v:
+                    continue
+                new_long_rows.append(
+                    {
+                        "work_month": work_month,
+                        "role": role,
+                        "display_name": display_name,
+                        "date": d,
+                        "value": v,
+                    }
+                )
+        new_long_df = pd.DataFrame(new_long_rows, columns=["work_month", "role", "display_name", "date", "value"])
+        save_df = pd.concat([existing_long, new_long_df], ignore_index=True)
+        if not save_df.empty:
+            save_df = save_df.drop_duplicates(subset=["work_month", "role", "display_name", "date"], keep="last")
+            save_df.sort_values(["work_month", "role", "display_name", "date"], inplace=True)
+
         save_csv_path = tmp_dir / OVERTIME_STATUS_FILENAME
         save_df.to_csv(save_csv_path, index=False, encoding="utf-8-sig")
 
@@ -1952,8 +2059,10 @@ def save_overtime_status():
         meta = {
             "saved_at": datetime.now(KST).isoformat(),
             "saved_by": (session.get("user_email") or ""),
+            "work_month": work_month,
             "row_count": len(out_rows),
             "date_count": len(date_keys),
+            "non_empty_cell_count": len(new_long_rows),
         }
         OVERTIME_STATUS_META_LOCAL_PATH.write_text(
             json.dumps(meta, ensure_ascii=False, indent=2),
@@ -1983,7 +2092,7 @@ def save_overtime_status():
                 }
             ), 500
 
-        msg = "연장근무 현황이 저장되었습니다."
+        msg = f"연장근무 현황이 저장되었습니다. (근로월 {work_month})"
         if gcs_ok:
             msg += " (GCS metadata/ 동기화됨)"
         elif not _is_railway_deploy():
