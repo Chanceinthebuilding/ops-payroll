@@ -10,12 +10,34 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
+
+
+def _credentials_from_service_account_dict(info: dict, scopes: list) -> "Credentials":
+    """
+    from_service_account_info 대신 임시 JSON 파일로 로드.
+    일부 환경에서 메모리 키 처리 시 PermissionError가 나는 경우를 피한다.
+    """
+    from google.oauth2.service_account import Credentials
+
+    fd, path = tempfile.mkstemp(suffix=".json", text=True)
+    path = str(path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(info, f)
+        return Credentials.from_service_account_file(path, scopes=scopes)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 @contextlib.contextmanager
@@ -23,6 +45,7 @@ def _google_api_safe_env():
     """
     Railway/Docker 등에서 기본 HOME·캐시 경로에 쓰기가 막혀 gspread/google-auth가
     PermissionError를 내는 경우가 있어, 시트 내보내기 구간만 임시 디렉터리로 고정한다.
+    잘못된 SSL_CERT_FILE 등은 읽기 실패(PermissionError)를 유발할 수 있어 제거한다.
     """
     tmp = Path(tempfile.gettempdir())
     sandbox = tmp / "chaftee_gspread"
@@ -34,6 +57,15 @@ def _google_api_safe_env():
 
     keys = ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR")
     saved = {k: os.environ.get(k) for k in keys}
+
+    ssl_keys = ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
+    ssl_removed: dict[str, str | None] = {}
+    for sk in ssl_keys:
+        v = os.environ.get(sk)
+        if v and (not Path(v).is_file()):
+            ssl_removed[sk] = v
+            os.environ.pop(sk, None)
+
     try:
         os.environ["HOME"] = str(sandbox)
         os.environ["XDG_CACHE_HOME"] = str(cache)
@@ -47,6 +79,9 @@ def _google_api_safe_env():
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+        for sk, v in ssl_removed.items():
+            if v is not None:
+                os.environ[sk] = v
 
 HOURLY_RATE_BASE = 11_000  # 통상시급 (원)
 MEAL_ALLOWANCE = 200_000  # 식대 (원), 기본급에서 차감
@@ -762,12 +797,14 @@ def create_google_sheet(
                             "서비스 계정 키 JSON 전체를 복사했는지 확인하세요."
                         )
                 try:
-                    creds = Credentials.from_service_account_info(info, scopes=scopes)
+                    creds = _credentials_from_service_account_dict(info, scopes)
                 except PermissionError as e:
+                    logger.exception("service_account dict → temp file")
                     fn = getattr(e, "filename", None)
                     raise RuntimeError(
                         f"자격 증명 처리 중 PermissionError{f': {fn}' if fn else ''}. "
-                        "GOOGLE_APPLICATION_CREDENTIALS(파일 경로) 변수는 Railway에서 삭제하세요."
+                        "Railway Variables에서 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)를 삭제하고 "
+                        "SSL_CERT_FILE·REQUESTS_CA_BUNDLE 등 로컬 전용 경로 변수도 비우세요."
                     ) from e
                 except Exception as e:
                     raise RuntimeError(
@@ -804,11 +841,12 @@ def create_google_sheet(
                 gc = gspread.authorize(creds)
                 sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
             except PermissionError as e:
+                logger.exception("gspread authorize / open_by_key")
                 fn = getattr(e, "filename", None)
                 raise RuntimeError(
                     f"PermissionError{f' ({fn})' if fn else ''}. "
-                    "Railway에는 GOOGLE_APPLICATION_CREDENTIALS_JSON만 두고, "
-                    "이름이 다른 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 삭제하세요."
+                    "GOOGLE_APPLICATION_CREDENTIALS_JSON만 두고 파일 경로 변수는 삭제. "
+                    "SSL_CERT_FILE 등 인증서 경로가 있으면 제거 후 재시도."
                 ) from e
             except Exception as e:
                 hint = (
@@ -862,5 +900,6 @@ def create_google_sheet(
             url = f"https://docs.google.com/spreadsheets/d/{TARGET_SPREADSHEET_ID}/edit#gid={ws_regular.id}"
             return url
     finally:
-        if _saved_gac_path is not None:
+        # JSON으로 내보낸 경우 잘못된 파일 경로를 복구하지 않음(다음 요청에서 다시 PermissionError 방지)
+        if _saved_gac_path is not None and not json_raw:
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _saved_gac_path
