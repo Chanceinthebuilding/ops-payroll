@@ -508,12 +508,41 @@ def _normalize_fm_person_name(val) -> str:
     return " ".join(s.split())
 
 
+def _fm_person_name_compact(val) -> str:
+    """이름 비교용: 모든 공백 제거(‘홍 길동’ vs ‘홍길동’)."""
+    n = _normalize_fm_person_name(val)
+    return "".join(n.split()) if n else ""
+
+
+def _fm_name_role_lookup(name_val, fm_name_to_role: dict[str, str]) -> str | None:
+    """급여 이름으로 FM 역할 조회. 정규화·무공백 키 순."""
+    n = _normalize_fm_person_name(name_val)
+    if n and n in fm_name_to_role:
+        return fm_name_to_role[n]
+    c = _fm_person_name_compact(name_val)
+    if c and c in fm_name_to_role:
+        return fm_name_to_role[c]
+    return None
+
+
+def _fm_name_to_role_dict_add(name_to_role: dict[str, str], display_name: str, role: str) -> None:
+    """이름→역할 맵에 표시용·무공백 키 둘 다 등록."""
+    n = _normalize_fm_person_name(display_name)
+    r = (role or "").strip()
+    if not n or not r:
+        return
+    name_to_role[n] = r
+    c = "".join(n.split())
+    if c and c != n:
+        name_to_role[c] = r
+
+
 def _load_fm_roster_data(path: Path):
     """
     FM 목록 xlsx → (사번→역할 DataFrame, 이름→역할 dict).
     - 사번이 있는 행만 eid 테이블에 포함(기존과 동일).
-    - 사번이 비어 있고 이름 컬럼이 있으면 이름→역할 보조 매칭(급여 employee_name과 연결).
-    이름 컬럼 후보: 이름, 성명
+    - 이름 컬럼이 있으면 **모든 행**에서 이름→역할을 등록(사번이 급여와 안 맞아도 이름으로 보조 매칭).
+    이름 컬럼 후보: 이름, 성명, 직원명, 한글명
     """
     import pandas as pd
 
@@ -531,7 +560,7 @@ def _load_fm_roster_data(path: Path):
         return None
 
     name_col = None
-    for c in ("이름", "성명"):
+    for c in ("이름", "성명", "직원명", "한글명"):
         if c in df.columns:
             name_col = c
             break
@@ -544,13 +573,10 @@ def _load_fm_roster_data(path: Path):
     name_to_role: dict[str, str] = {}
     if name_col is not None:
         for _, row in df.iterrows():
-            eid = _normalize_employee_id_val(row.get("사번"))
-            if eid:
-                continue
-            nm = _normalize_fm_person_name(row.get(name_col))
             role = str(row.get("역할", "")).strip()
-            if nm and role:
-                name_to_role[nm] = role  # 동명이인이면 시트 아래 행이 우선(keep last)
+            if not role:
+                continue
+            _fm_name_to_role_dict_add(name_to_role, row.get(name_col), role)
 
     if out.empty and not name_to_role:
         return None
@@ -701,8 +727,16 @@ def _build_dashboard_context(output_dir: Path):
             pm["name_norm"] = ""
         merged = pm.merge(fm_pairs, on="eid_norm", how="left")
         if fm_name_to_role:
-            miss = merged["fm_role"].isna() & (merged["name_norm"].str.len() > 0)
-            merged.loc[miss, "fm_role"] = merged.loc[miss, "name_norm"].map(fm_name_to_role)
+            miss = merged["fm_role"].isna()
+            if "employee_name" in merged.columns:
+                miss = miss & merged["employee_name"].notna()
+                merged.loc[miss, "fm_role"] = merged.loc[miss].apply(
+                    lambda r: _fm_name_role_lookup(r.get("employee_name"), fm_name_to_role),
+                    axis=1,
+                )
+            else:
+                miss = miss & (merged["name_norm"].str.len() > 0)
+                merged.loc[miss, "fm_role"] = merged.loc[miss, "name_norm"].map(fm_name_to_role)
         fm_matched_in_payroll = int(merged["fm_role"].notna().sum())
         merged["fm_role"] = merged["fm_role"].fillna("(FM 목록 없음)")
         tpm = merged["total_pay"].apply(_to_num)
