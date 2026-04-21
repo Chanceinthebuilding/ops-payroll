@@ -729,32 +729,48 @@ def create_google_sheet(
             ) from e
     else:
         # 인증: env 파일 경로 → credentials/ → .keys/ops-robot-keys.json
+        # exists()만 쓰면 디렉터리 경로가 통과해 PermissionError가 날 수 있음 → is_file() 사용
         cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not cred_path or not Path(cred_path).exists():
+        if not cred_path or not Path(cred_path).is_file():
             for p in [
                 ROOT / "credentials" / "service_account.json",
                 ROOT / ".keys" / "ops-robot-keys.json",
             ]:
-                if p.exists():
+                if p.is_file():
                     cred_path = str(p)
                     break
             else:
                 raise RuntimeError(
                     "구글 시트 API 인증이 없습니다. "
-                    "Railway 등에는 GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체)을 설정하거나, "
-                    "credentials/service_account.json 또는 .keys/ops-robot-keys.json 을 두거나, "
-                    "GOOGLE_APPLICATION_CREDENTIALS(키 파일 경로)를 설정하세요."
+                    "Railway에는 GOOGLE_APPLICATION_CREDENTIALS_JSON에 서비스 계정 JSON 전체를 넣으세요. "
+                    "로컬 경로용 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 Railway에서 제거하거나 비우세요."
                 )
-        creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
+        try:
+            creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
+        except PermissionError as e:
+            fn = getattr(e, "filename", None) or cred_path
+            raise RuntimeError(
+                f"키 파일을 읽을 수 없습니다(PermissionError): {fn}. "
+                "Railway에서는 GOOGLE_APPLICATION_CREDENTIALS_JSON만 사용하고, "
+                "GOOGLE_APPLICATION_CREDENTIALS에 Windows 경로(C:\\...)나 읽기 불가 경로가 들어가 있지 않은지 확인하세요."
+            ) from e
     try:
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
+    except PermissionError as e:
+        fn = getattr(e, "filename", None)
+        raise RuntimeError(
+            f"파일 접근이 거부되었습니다(PermissionError){f': {fn}' if fn else ''}. "
+            "Railway Variables에서 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)를 삭제하고, "
+            "GOOGLE_APPLICATION_CREDENTIALS_JSON에 ops-robot-keys.json과 동일한 JSON 전체만 넣으세요. "
+            "로컬 전용 경로가 다른 변수에 남아 있으면 제거하세요."
+        ) from e
     except Exception as e:
         hint = (
             f"구글 시트 API 오류 ({type(e).__name__}): {e}. "
-            "① Railway Variables에 GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체) 설정 "
+            "① Railway에 GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체) "
             "② 해당 JSON의 client_email을 스프레드시트에 편집자로 공유 "
-            "③ Google Cloud 콘솔에서 'Google Sheets API' 사용 설정"
+            "③ Google Cloud에서 'Google Sheets API' 사용 설정"
         )
         raise RuntimeError(hint) from e
 
