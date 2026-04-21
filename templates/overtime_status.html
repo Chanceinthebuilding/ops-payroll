@@ -35,8 +35,8 @@
       color: #475569;
       line-height: 1.6;
     }
-    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; min-width: 960px; }
-    th, td { padding: 6px 6px; border-right: 1px solid #d1d9e6; border-bottom: 1px solid #d1d9e6; text-align: left; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.78rem; min-width: 1080px; }
+    th, td { padding: 4px 5px; border-right: 1px solid #b8c2d4; border-bottom: 1px solid #b8c2d4; text-align: left; }
     th {
       color: #334155;
       font-size: 0.7rem;
@@ -48,37 +48,53 @@
       top: 0;
       z-index: 4;
     }
+    thead tr:nth-child(1) th { top: 0; z-index: 8; }
+    thead tr:nth-child(2) th { top: 24px; z-index: 8; }
     th:first-child, td:first-child { border-left: 1px solid #d1d9e6; }
     thead tr:first-child th { border-top: 1px solid #d1d9e6; }
     th.left-sticky, td.left-sticky {
       position: sticky;
       left: 0;
-      z-index: 5;
-      background: #ffffff !important;
+      z-index: 7;
+      background: #f3f4f6 !important;
     }
     th.left-sticky-2, td.left-sticky-2 {
       position: sticky;
       left: 138px;
-      z-index: 5;
-      background: #ffffff !important;
+      z-index: 7;
+      background: #f3f4f6 !important;
     }
-    th.left-sticky { min-width: 138px; }
-    td.left-sticky { min-width: 138px; font-weight: 700; color: #1e293b; }
-    th.left-sticky-2, td.left-sticky-2 { min-width: 160px; }
+    th.left-sticky { min-width: 132px; }
+    td.left-sticky { min-width: 132px; font-weight: 700; color: #1e293b; }
+    th.left-sticky-2, td.left-sticky-2 { min-width: 150px; }
     td.left-sticky-2 { color: #334155; }
+    .weekday-head { background: #f8fafc; }
+    .weekend-head { background: #fdf2e3; }
+    .dow-head { font-size: 0.65rem; color: #64748b; }
     td.editable {
-      min-width: 56px;
+      min-width: 50px;
       text-align: right;
       font-variant-numeric: tabular-nums;
-      background: #f8fafc;
+      background: #fcfdff;
       outline: none;
     }
     td.readonly {
-      min-width: 56px;
+      min-width: 50px;
       text-align: right;
       color: #334155;
       font-variant-numeric: tabular-nums;
       background: #ffffff;
+    }
+    td.weekend-cell { background: #fdf7ee; }
+    .row-total-head, .row-total-cell {
+      position: sticky;
+      right: 0;
+      z-index: 6;
+      background: #fce7f3 !important;
+      min-width: 66px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
     }
     td.editable:focus { background: #eef2ff; box-shadow: inset 0 0 0 2px #c7d2fe; }
     .save-bar {
@@ -111,7 +127,7 @@
     .group-row td {
       position: sticky;
       left: 0;
-      z-index: 3;
+      z-index: 5;
       background: #eef2ff;
       font-weight: 700;
       color: #1e3a8a;
@@ -143,6 +159,32 @@
       display: none;
       max-width: 240px;
     }
+    .role-tag {
+      display: inline-block;
+      font-size: 0.66rem;
+      font-weight: 800;
+      border-radius: 999px;
+      padding: 1px 7px;
+      color: #1f2937;
+      background: #e5e7eb;
+    }
+    .role-tag.tagging { background: #fef3c7; color: #92400e; }
+    .role-tag.cleaning { background: #dcfce7; color: #166534; }
+    .role-tag.shooting { background: #dbeafe; color: #1d4ed8; }
+    .role-tag.packing { background: #fee2e2; color: #b91c1c; }
+    .role-tag.logistics { background: #ede9fe; color: #6d28d9; }
+    tfoot td {
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: #f8fafc;
+    }
+    tfoot td.total-label {
+      position: sticky;
+      left: 0;
+      z-index: 7;
+      background: #eef2ff;
+      color: #3730a3;
+    }
   </style>
 </head>
 <body>
@@ -165,26 +207,39 @@
             <th class="left-sticky">역할</th>
             <th class="left-sticky-2">닉네임(이름)</th>
             {% for d in date_headers %}
-            <th data-date-key="{{ d.key }}">{{ d.label }}</th>
+            <th class="{% if d.is_weekend %}weekend-head{% else %}weekday-head{% endif %}" data-date-key="{{ d.key }}">{{ d.label }}</th>
             {% endfor %}
+            <th class="row-total-head">근무시간</th>
+          </tr>
+          <tr>
+            <th class="left-sticky dow-head">구분</th>
+            <th class="left-sticky-2 dow-head">인원</th>
+            {% for d in date_headers %}
+            <th class="dow-head {% if d.is_weekend %}weekend-head{% else %}weekday-head{% endif %}" data-date-key="{{ d.key }}">{{ d.dow }}</th>
+            {% endfor %}
+            <th class="row-total-head dow-head">합계</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
           <tr data-role="{{ r.role }}" data-display-name="{{ r.display_name }}">
-            <td class="left-sticky">{{ r.role }}</td>
+            <td class="left-sticky">
+              <span class="role-tag">{{ r.role }}</span>
+            </td>
             <td class="left-sticky-2">{{ r.display_name }}</td>
-            {% for d in date_keys %}
+            {% for d in date_headers %}
             <td
-              class="{% if can_save %}editable{% else %}readonly{% endif %}"
-              data-date="{{ d }}"
-              title="{{ d }} / {{ r.display_name }}"
+              class="{% if can_save %}editable{% else %}readonly{% endif %} {% if d.is_weekend %}weekend-cell{% endif %}"
+              data-date="{{ d.key }}"
+              title="{{ d.key }} / {{ r.display_name }}"
               {% if can_save %}contenteditable="true"{% endif %}
-            >{{ r[d] }}</td>
+            >{{ r[d.key] }}</td>
             {% endfor %}
+            <td class="row-total-cell" data-row-total="1">0</td>
           </tr>
           {% endfor %}
         </tbody>
+        <tfoot id="summaryFoot"></tfoot>
       </table>
     </section>
     {% if can_save %}
@@ -215,7 +270,7 @@
       if (!table) return;
 
       var dateLabelMap = {};
-      var headerDateCells = table.querySelectorAll("thead th[data-date-key]");
+      var headerDateCells = table.querySelectorAll("thead tr:first-child th[data-date-key]");
       headerDateCells.forEach(function(th) {
         var k = th.getAttribute("data-date-key");
         if (k) dateLabelMap[k] = (th.textContent || "").trim() || k;
@@ -234,7 +289,7 @@
           g.className = "group-row";
           g.setAttribute("data-group-role", role);
           var td = document.createElement("td");
-          td.colSpan = {{ 2 + (date_keys|length) }};
+          td.colSpan = {{ 3 + (date_keys|length) }};
           var btn = document.createElement("button");
           btn.type = "button";
           btn.className = "group-btn";
@@ -293,6 +348,91 @@
         });
       }
 
+      function roleClass(role) {
+        var r = String(role || "").toLowerCase();
+        if (r.indexOf("태깅") >= 0 || r.indexOf("tag") >= 0) return "tagging";
+        if (r.indexOf("클리닝") >= 0 || r.indexOf("clean") >= 0) return "cleaning";
+        if (r.indexOf("촬영") >= 0 || r.indexOf("shoot") >= 0) return "shooting";
+        if (r.indexOf("포장") >= 0 || r.indexOf("pack") >= 0) return "packing";
+        if (r.indexOf("물류") >= 0 || r.indexOf("logis") >= 0) return "logistics";
+        return "";
+      }
+
+      function decorateRoleTags() {
+        var tags = table.querySelectorAll(".role-tag");
+        tags.forEach(function(tag) {
+          var c = roleClass(tag.textContent || "");
+          if (c) tag.classList.add(c);
+        });
+      }
+
+      function toNumber(val) {
+        var s = parseEditableText(val);
+        if (s === null || s === "") return 0;
+        return Number(s) || 0;
+      }
+
+      function redrawSummary() {
+        var foot = document.getElementById("summaryFoot");
+        if (!foot) return;
+        var dateKeys = [{% for d in date_headers %}"{{ d.key }}"{% if not loop.last %},{% endif %}{% endfor %}];
+        var roleOrder = ["태깅", "클리닝", "촬영", "포장", "물류"];
+        var grouped = {};
+        roleOrder.forEach(function(r) { grouped[r] = { total: 0, byDate: {} }; });
+        var all = { total: 0, byDate: {} };
+        dateKeys.forEach(function(d) { all.byDate[d] = 0; roleOrder.forEach(function(r){ grouped[r].byDate[d] = 0; }); });
+
+        table.querySelectorAll("tbody tr[data-role]").forEach(function(tr) {
+          if (tr.style.display === "none") return;
+          var role = (tr.getAttribute("data-role") || "").trim();
+          var matchedRole = roleOrder.find(function(r){ return role.indexOf(r) >= 0; }) || "기타";
+          if (!grouped[matchedRole]) grouped[matchedRole] = { total: 0, byDate: {} };
+          dateKeys.forEach(function(d){ if (grouped[matchedRole].byDate[d] == null) grouped[matchedRole].byDate[d] = 0; });
+          var rowSum = 0;
+          tr.querySelectorAll("td[data-date]").forEach(function(td) {
+            var d = td.getAttribute("data-date");
+            var n = toNumber(td.textContent);
+            rowSum += n;
+            grouped[matchedRole].byDate[d] = (grouped[matchedRole].byDate[d] || 0) + n;
+            all.byDate[d] = (all.byDate[d] || 0) + n;
+          });
+          grouped[matchedRole].total += rowSum;
+          all.total += rowSum;
+          var totalCell = tr.querySelector("td[data-row-total]");
+          if (totalCell) totalCell.textContent = String(rowSum || 0);
+        });
+
+        function makeRow(label, bucket) {
+          var tr = document.createElement("tr");
+          var td0 = document.createElement("td");
+          td0.className = "total-label";
+          td0.textContent = label;
+          tr.appendChild(td0);
+          var td1 = document.createElement("td");
+          td1.textContent = "";
+          tr.appendChild(td1);
+          dateKeys.forEach(function(d) {
+            var td = document.createElement("td");
+            td.textContent = String((bucket.byDate[d] || 0));
+            td.style.textAlign = "right";
+            tr.appendChild(td);
+          });
+          var tdLast = document.createElement("td");
+          tdLast.className = "row-total-cell";
+          tdLast.textContent = String(bucket.total || 0);
+          tr.appendChild(tdLast);
+          return tr;
+        }
+
+        foot.innerHTML = "";
+        roleOrder.forEach(function(r) {
+          var b = grouped[r];
+          if (!b) return;
+          foot.appendChild(makeRow(r + " 총합", b));
+        });
+        foot.appendChild(makeRow("전체 총합", all));
+      }
+
       function parseEditableText(txt) {
         if (!txt) return "";
         var s = String(txt).trim().replace(/,/g, "");
@@ -345,11 +485,15 @@
       }
 
       setupGroupRows();
+      decorateRoleTags();
       bindCellToast();
+      redrawSummary();
       if (!canSave || !saveUrl || !saveBar || !saveHint || !btnSave) return;
       table.addEventListener("input", updateDirty, true);
       table.addEventListener("blur", updateDirty, true);
       table.addEventListener("change", updateDirty, true);
+      table.addEventListener("input", redrawSummary, true);
+      table.addEventListener("change", redrawSummary, true);
 
       btnSave.addEventListener("click", function() {
         if (hasInvalid()) {

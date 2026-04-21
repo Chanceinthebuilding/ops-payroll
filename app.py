@@ -1188,7 +1188,12 @@ def overtime_status():
                 has_saved=has_saved,
             )
         date_headers = [
-            {"key": d, "label": f"{int(d[5:7])}/{int(d[8:10])}"}
+            {
+                "key": d,
+                "label": f"{int(d[5:7])}/{int(d[8:10])}",
+                "dow": ("월", "화", "수", "목", "금", "토", "일")[datetime.fromisoformat(d).weekday()],
+                "is_weekend": datetime.fromisoformat(d).weekday() >= 5,
+            }
             for d in date_keys
         ]
         can_save = is_current_user_admin()
