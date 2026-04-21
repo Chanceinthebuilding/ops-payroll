@@ -1,12 +1,14 @@
 """
 payroll_result.csv를 구글 시트 형식으로 변환하여 새 시트를 생성합니다.
 필요: gspread, google-auth
-설정: credentials/ 폴더에 service_account.json 또는 GOOGLE_APPLICATION_CREDENTIALS 환경변수
+설정: GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체 문자열, Railway 권장) 또는
+      credentials/service_account.json 또는 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)
 
 급여산정: N월 급여 = 전월 25일 ~ 당월 24일. 기본급 = (11,000 × scheduled_minutes/60 × 영업일) - 200,000(식대). 계약별 scheduled_minutes는 contract_config.yaml 참조.
 """
 from __future__ import annotations
 
+import json
 import os
 from datetime import date, timedelta
 from pathlib import Path
@@ -699,25 +701,38 @@ def create_google_sheet(
     sheet_title_정규직 = f"{payroll_year}년{payroll_month:02d}월_정규직"
     sheet_title_freelance = f"{payroll_year}년{payroll_month:02d}월_프리랜스"
 
-    # 인증: env → credentials/ → .keys/ops-robot-keys.json
-    cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if not cred_path or not Path(cred_path).exists():
-        for p in [
-            ROOT / "credentials" / "service_account.json",
-            ROOT / ".keys" / "ops-robot-keys.json",
-        ]:
-            if p.exists():
-                cred_path = str(p)
-                break
-        else:
-            raise RuntimeError(
-                "구글 시트 API 인증 파일이 없습니다. "
-                "credentials/service_account.json 또는 .keys/ops-robot-keys.json 을 생성하거나 "
-                "GOOGLE_APPLICATION_CREDENTIALS 환경변수를 설정하세요."
-            )
-
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
+
+    json_raw = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON") or "").strip()
+    if json_raw:
+        try:
+            info = json.loads(json_raw)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                "GOOGLE_APPLICATION_CREDENTIALS_JSON 파싱에 실패했습니다. JSON 형식을 확인하세요."
+            ) from e
+        if not isinstance(info, dict):
+            raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS_JSON은 JSON 객체여야 합니다.")
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        # 인증: env 파일 경로 → credentials/ → .keys/ops-robot-keys.json
+        cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not cred_path or not Path(cred_path).exists():
+            for p in [
+                ROOT / "credentials" / "service_account.json",
+                ROOT / ".keys" / "ops-robot-keys.json",
+            ]:
+                if p.exists():
+                    cred_path = str(p)
+                    break
+            else:
+                raise RuntimeError(
+                    "구글 시트 API 인증이 없습니다. "
+                    "Railway 등에는 GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체)을 설정하거나, "
+                    "credentials/service_account.json 또는 .keys/ops-robot-keys.json 을 두거나, "
+                    "GOOGLE_APPLICATION_CREDENTIALS(키 파일 경로)를 설정하세요."
+                )
+        creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
 
