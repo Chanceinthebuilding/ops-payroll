@@ -10,10 +10,30 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _ensure_writable_home_for_google_client() -> None:
+    """
+    Railway/Docker 등에서 HOME이 읽기 전용이면 google-auth/SSL 등이 캐시·임시 파일 쓰기 시
+    PermissionError가 날 수 있음 → 쓰기 가능한 HOME·캐시 경로를 맞춤.
+    """
+    tmp = tempfile.gettempdir()
+    try:
+        home = Path(os.environ.get("HOME", "") or "").expanduser()
+        if home.is_dir() and os.access(home, os.W_OK):
+            return
+    except OSError:
+        pass
+    os.environ["HOME"] = tmp
+    # 일부 라이브러리가 XDG 아래에만 쓰는 경우
+    xdg = str(Path(tmp) / ".cache" / "google")
+    Path(xdg).mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("XDG_CACHE_HOME", str(Path(tmp) / ".cache"))
 
 HOURLY_RATE_BASE = 11_000  # 통상시급 (원)
 MEAL_ALLOWANCE = 200_000  # 식대 (원), 기본급에서 차감
@@ -754,6 +774,7 @@ def create_google_sheet(
                 "Railway에서는 GOOGLE_APPLICATION_CREDENTIALS_JSON만 사용하고, "
                 "GOOGLE_APPLICATION_CREDENTIALS에 Windows 경로(C:\\...)나 읽기 불가 경로가 들어가 있지 않은지 확인하세요."
             ) from e
+    _ensure_writable_home_for_google_client()
     try:
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
@@ -761,9 +782,8 @@ def create_google_sheet(
         fn = getattr(e, "filename", None)
         raise RuntimeError(
             f"파일 접근이 거부되었습니다(PermissionError){f': {fn}' if fn else ''}. "
-            "Railway Variables에서 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)를 삭제하고, "
-            "GOOGLE_APPLICATION_CREDENTIALS_JSON에 ops-robot-keys.json과 동일한 JSON 전체만 넣으세요. "
-            "로컬 전용 경로가 다른 변수에 남아 있으면 제거하세요."
+            "① Railway에서 GOOGLE_APPLICATION_CREDENTIALS(파일 경로) 삭제, GOOGLE_APPLICATION_CREDENTIALS_JSON만 사용 "
+            "② 그래도 동일하면 Railway Variables에 HOME=/tmp 를 추가해 보세요(컨테이너 HOME 쓰기 불가 시)."
         ) from e
     except Exception as e:
         hint = (
