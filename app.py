@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import yaml
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -44,6 +45,8 @@ OVERTIME_STATUS_FILENAME = "overtime_status.csv"
 OVERTIME_STATUS_META_FILENAME = "overtime_status_meta.json"
 OVERTIME_STATUS_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / OVERTIME_STATUS_FILENAME
 OVERTIME_STATUS_META_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / OVERTIME_STATUS_META_FILENAME
+DASHBOARD_CACHE_FILENAME = "dashboard_cache.json"
+DASHBOARD_CACHE_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / DASHBOARD_CACHE_FILENAME
 PUBLISHED_META_FILENAME = "meta.json"
 KST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(ROOT))
@@ -64,6 +67,8 @@ _gcs_client = None
 _gcs_storage_loaded = False
 _gcs_storage_mod = None
 logger = logging.getLogger(__name__)
+_VIEW_CACHE: dict[str, dict] = {}
+_VIEW_CACHE_TTL_SEC = int((os.environ.get("VIEW_CACHE_TTL_SEC") or "30").strip() or "30")
 
 
 def _normalize_google_credentials_env() -> None:
@@ -116,12 +121,26 @@ def logout():
 def dashboard():
     if not _published_exists():
         return render_template("dashboard.html", dashboard_ready=False)
+    pmeta = _read_published_meta_dict() or {}
+    fm_meta = _read_fm_upload_meta_dict() or {}
+    token = f"{pmeta.get('published_at','')}|{fm_meta.get('uploaded_at','')}"
+    hit = _view_cache_get("dashboard", token)
+    if hit is not None:
+        return render_template("dashboard.html", **hit)
+
+    pre = _read_dashboard_cache_dict() or {}
+    pre_ctx = pre.get("ctx") if isinstance(pre, dict) else None
+    if isinstance(pre_ctx, dict) and pre_ctx:
+        _view_cache_set("dashboard", token, pre_ctx)
+        return render_template("dashboard.html", **pre_ctx)
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         if not _download_published_to_dir(tmp_dir):
             return render_template("dashboard.html", dashboard_ready=False)
         _attach_fm_roster_to_dir(tmp_dir)
         ctx = _build_dashboard_context(tmp_dir)
+        _view_cache_set("dashboard", token, ctx)
         return render_template("dashboard.html", **ctx)
 
 
@@ -316,6 +335,10 @@ def _overtime_status_meta_blob_name() -> str:
     return f"metadata/{OVERTIME_STATUS_META_FILENAME}"
 
 
+def _dashboard_cache_blob_name() -> str:
+    return f"metadata/{DASHBOARD_CACHE_FILENAME}"
+
+
 def _fm_roster_exists_remote_or_local() -> bool:
     if gcs_enabled():
         return _gcs_blob_exists(_fm_roster_blob_name())
@@ -366,6 +389,18 @@ def _attach_overtime_status_to_dir(target_dir: Path) -> bool:
     if OVERTIME_STATUS_LOCAL_PATH.is_file():
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(OVERTIME_STATUS_LOCAL_PATH, dest)
+        return True
+    return False
+
+
+def _attach_dashboard_cache_to_dir(target_dir: Path) -> bool:
+    dest = target_dir / DASHBOARD_CACHE_FILENAME
+    if gcs_enabled():
+        if _gcs_download_file(_dashboard_cache_blob_name(), dest):
+            return True
+    if DASHBOARD_CACHE_LOCAL_PATH.is_file():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(DASHBOARD_CACHE_LOCAL_PATH, dest)
         return True
     return False
 
@@ -566,6 +601,98 @@ def _write_published_meta_local(meta: dict) -> None:
         json.dumps(meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _read_overtime_status_meta_dict() -> dict | None:
+    p = OVERTIME_STATUS_META_LOCAL_PATH
+    if p.is_file():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    if gcs_enabled():
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tf:
+            tfp = Path(tf.name)
+        try:
+            if _gcs_download_file(_overtime_status_meta_blob_name(), tfp):
+                return json.loads(tfp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+        finally:
+            tfp.unlink(missing_ok=True)
+    return None
+
+
+def _read_dashboard_cache_dict() -> dict | None:
+    p = DASHBOARD_CACHE_LOCAL_PATH
+    if p.is_file():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    if gcs_enabled():
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tf:
+            tfp = Path(tf.name)
+        try:
+            if _gcs_download_file(_dashboard_cache_blob_name(), tfp):
+                return json.loads(tfp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+        finally:
+            tfp.unlink(missing_ok=True)
+    return None
+
+
+def _view_cache_get(key: str, token: str):
+    now = time.time()
+    item = _VIEW_CACHE.get(key)
+    if not item:
+        return None
+    if item.get("token") != token:
+        return None
+    if float(item.get("exp", 0)) < now:
+        _VIEW_CACHE.pop(key, None)
+        return None
+    return item.get("val")
+
+
+def _view_cache_set(key: str, token: str, val):
+    _VIEW_CACHE[key] = {"token": token, "exp": (time.time() + max(_VIEW_CACHE_TTL_SEC, 1)), "val": val}
+
+
+def _view_cache_clear(prefix: str | None = None):
+    if not prefix:
+        _VIEW_CACHE.clear()
+        return
+    for k in list(_VIEW_CACHE.keys()):
+        if k.startswith(prefix):
+            _VIEW_CACHE.pop(k, None)
+
+
+def _save_dashboard_cache(ctx: dict, source: str = "") -> None:
+    payload = {
+        "generated_at": datetime.now(KST).isoformat(),
+        "source": source,
+        "published_at": ((_read_published_meta_dict() or {}).get("published_at") or ""),
+        "ctx": ctx,
+    }
+    FM_ROSTER_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+    DASHBOARD_CACHE_LOCAL_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    if gcs_enabled():
+        _gcs_upload_text(json.dumps(payload, ensure_ascii=False), _dashboard_cache_blob_name())
+
+
+def _rebuild_dashboard_cache_from_dir(output_dir: Path, source: str = "") -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        for name in PUBLISHED_FILES:
+            src = output_dir / name
+            if src.exists():
+                shutil.copy2(src, tmp_dir / name)
+        _attach_fm_roster_to_dir(tmp_dir)
+        ctx = _build_dashboard_context(tmp_dir)
+        _save_dashboard_cache(ctx, source=source)
+        _view_cache_clear("dashboard")
 
 
 def _format_iso_kst_display(iso_str: str | None) -> str:
@@ -1195,60 +1322,37 @@ def _build_dashboard_context(output_dir: Path):
 
 @app.route("/overtime-status")
 def overtime_status():
-    if not _published_exists():
-        return render_template(
-            "overtime_status.html",
-            overtime_ready=False,
-            overtime_error="공개 급여 데이터가 없어 일자를 만들 수 없습니다.",
-            date_keys=[],
-            date_headers=[],
-            rows=[],
-            can_save=False,
-            save_url=None,
-            has_saved=False,
-        )
+    default_month = datetime.now(KST).strftime("%Y-%m")
+    work_month = _normalize_work_month(request.args.get("work_month"), default_month)
+    can_save = is_current_user_admin()
+    fm_meta = _read_fm_upload_meta_dict() or {}
+    ov_meta = _read_overtime_status_meta_dict() or {}
+    token = f"{work_month}|{fm_meta.get('uploaded_at','')}|{ov_meta.get('saved_at','')}|{int(can_save)}"
+    hit = _view_cache_get(f"overtime:{work_month}", token)
+    if hit is not None:
+        return render_template("overtime_status.html", **hit)
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        if not _download_published_to_dir(tmp_dir):
-            return render_template(
-                "overtime_status.html",
-                overtime_ready=False,
-                overtime_error="공개 급여 데이터를 불러오지 못했습니다.",
-                date_keys=[],
-                date_headers=[],
-                rows=[],
-                can_save=False,
-                save_url=None,
-                has_saved=False,
-            )
         _attach_fm_roster_to_dir(tmp_dir)
-        default_month = _default_work_month_from_published_dir(tmp_dir)
-        work_month = _normalize_work_month(request.args.get("work_month"), default_month)
+        _attach_overtime_status_to_dir(tmp_dir)
         rows, date_keys, has_saved = _build_overtime_status_table(tmp_dir, work_month)
-        if not date_keys:
-            return render_template(
-                "overtime_status.html",
-                overtime_ready=False,
-                overtime_error="일자 정보를 찾지 못했습니다. 급여 데이터의 날짜 컬럼을 확인하세요.",
-                date_keys=[],
-                date_headers=[],
-                rows=[],
-                can_save=False,
-                save_url=None,
-                has_saved=has_saved,
-            )
         if not rows:
-            return render_template(
-                "overtime_status.html",
-                overtime_ready=False,
-                overtime_error="FM 기본정보(역할 + 닉네임/이름)가 없어 테이블을 만들 수 없습니다.",
-                date_keys=[],
-                date_headers=[],
-                rows=[],
-                can_save=False,
-                save_url=None,
-                has_saved=has_saved,
-            )
+            ctx = {
+                "overtime_ready": False,
+                "overtime_error": "FM 기본정보(역할 + 닉네임/이름)가 없어 테이블을 만들 수 없습니다.",
+                "date_keys": [],
+                "date_headers": [],
+                "rows": [],
+                "can_save": False,
+                "save_url": None,
+                "has_saved": has_saved,
+                "work_month": work_month,
+                "period_start": "",
+                "period_end": "",
+            }
+            _view_cache_set(f"overtime:{work_month}", token, ctx)
+            return render_template("overtime_status.html", **ctx)
         period_start = date_keys[0]
         period_end = date_keys[-1]
         date_headers = [
@@ -1260,21 +1364,21 @@ def overtime_status():
             }
             for d in date_keys
         ]
-        can_save = is_current_user_admin()
-        return render_template(
-            "overtime_status.html",
-            overtime_ready=True,
-            overtime_error=None,
-            date_keys=date_keys,
-            date_headers=date_headers,
-            rows=rows,
-            work_month=work_month,
-            period_start=period_start,
-            period_end=period_end,
-            can_save=can_save,
-            save_url=(url_for("save_overtime_status") if can_save else None),
-            has_saved=has_saved,
-        )
+        ctx = {
+            "overtime_ready": True,
+            "overtime_error": None,
+            "date_keys": date_keys,
+            "date_headers": date_headers,
+            "rows": rows,
+            "work_month": work_month,
+            "period_start": period_start,
+            "period_end": period_end,
+            "can_save": can_save,
+            "save_url": (url_for("save_overtime_status") if can_save else None),
+            "has_saved": has_saved,
+        }
+        _view_cache_set(f"overtime:{work_month}", token, ctx)
+        return render_template("overtime_status.html", **ctx)
 
 
 def _is_non_half_hour(val) -> bool:
@@ -1918,6 +2022,11 @@ def save_published_payroll():
                 }
             ), 500
 
+        try:
+            _rebuild_dashboard_cache_from_dir(tmp_dir, source="payroll_table_save")
+        except Exception:
+            logger.exception("dashboard cache rebuild after payroll/save")
+
         msg = "공개 급여 데이터가 저장되었습니다."
         if gcs_ok:
             msg += " (GCS published/ 동기화됨)"
@@ -1940,13 +2049,9 @@ def save_overtime_status():
     if not isinstance(rows_in, list) or not rows_in:
         return jsonify({"ok": False, "error": "저장할 테이블 데이터(rows)가 없습니다."}), 400
 
-    if not _published_exists():
-        return jsonify({"ok": False, "error": "공개 급여 데이터가 없어 저장할 수 없습니다."}), 400
-
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        if not _download_published_to_dir(tmp_dir):
-            return jsonify({"ok": False, "error": "공개 급여 데이터를 불러오지 못했습니다."}), 500
+        _attach_overtime_status_to_dir(tmp_dir)
         if not _attach_fm_roster_to_dir(tmp_dir):
             return jsonify({"ok": False, "error": "FM 기본정보가 없어 저장할 수 없습니다."}), 400
 
@@ -2068,6 +2173,7 @@ def save_overtime_status():
             json.dumps(meta, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        _view_cache_clear("overtime:")
 
         gcs_ok = False
         if gcs_enabled():
@@ -2148,6 +2254,16 @@ def admin_fm_roster():
                 json.dumps(fm_meta, ensure_ascii=False, indent=2),
                 _fm_upload_meta_blob_name(),
             )
+        _view_cache_clear("dashboard")
+        _view_cache_clear("overtime:")
+        if _published_exists():
+            with tempfile.TemporaryDirectory() as t2:
+                pdir = Path(t2)
+                if _download_published_to_dir(pdir):
+                    try:
+                        _rebuild_dashboard_cache_from_dir(pdir, source="fm_roster_upload")
+                    except Exception:
+                        logger.exception("dashboard cache rebuild after fm roster upload")
         flash(
             f"FM 기본정보를 반영했습니다. (사번 {len(pairs)}건 + 이름 보조 {len(name_map)}건 = 매칭 키 {n}건, 대시보드 역할별 집계에 사용)",
             "success",
@@ -2234,6 +2350,10 @@ def admin_data():
                 leave_path=leave_path,
                 uploaded_by=(session.get("user_email") or ""),
             )
+            try:
+                _rebuild_dashboard_cache_from_dir(run_dir, source="admin_upload")
+            except Exception:
+                logger.exception("dashboard cache rebuild after admin upload")
             if _gcs_env_configured() and not gcs_enabled():
                 flash(
                     "GCS 환경변수는 있으나 google-cloud-storage 라이브러리를 불러오지 못했습니다. "
