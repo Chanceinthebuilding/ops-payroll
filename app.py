@@ -1780,6 +1780,7 @@ def export_google_sheet():
 
         try:
             from google_sheet_exporter import create_google_sheet
+
             url = create_google_sheet(output_dir)
             return jsonify({"ok": True, "url": url})
         except FileNotFoundError as e:
@@ -1787,7 +1788,13 @@ def export_google_sheet():
         except RuntimeError as e:
             return jsonify({"ok": False, "error": str(e)}), 500
         except Exception as e:
-            return jsonify({"ok": False, "error": f"내보내기 실패: {e}"}), 500
+            logger.exception("export_google_sheet")
+            detail = str(e).strip()
+            if not detail:
+                detail = repr(e)
+            if not detail or detail == "()":
+                detail = type(e).__name__
+            return jsonify({"ok": False, "error": f"내보내기 실패: {detail}"}), 500
 
 
 if __name__ == "__main__":

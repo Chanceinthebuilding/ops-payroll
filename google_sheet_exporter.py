@@ -709,11 +709,24 @@ def create_google_sheet(
             info = json.loads(json_raw)
         except json.JSONDecodeError as e:
             raise RuntimeError(
-                "GOOGLE_APPLICATION_CREDENTIALS_JSON 파싱에 실패했습니다. JSON 형식을 확인하세요."
+                "GOOGLE_APPLICATION_CREDENTIALS_JSON 파싱에 실패했습니다. "
+                "Railway에는 서비스 계정 JSON 전체를 한 덩어리로 넣고, 앞뒤에 따옴표를 붙이지 마세요."
             ) from e
         if not isinstance(info, dict):
             raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS_JSON은 JSON 객체여야 합니다.")
-        creds = Credentials.from_service_account_info(info, scopes=scopes)
+        for key in ("type", "project_id", "private_key", "client_email"):
+            if not info.get(key):
+                raise RuntimeError(
+                    f"GOOGLE_APPLICATION_CREDENTIALS_JSON에 필수 필드 '{key}'가 없습니다. "
+                    "서비스 계정 키 JSON 전체를 복사했는지 확인하세요."
+                )
+        try:
+            creds = Credentials.from_service_account_info(info, scopes=scopes)
+        except Exception as e:
+            raise RuntimeError(
+                f"서비스 계정 자격 증명을 읽지 못했습니다 ({type(e).__name__}: {e}). "
+                "private_key가 잘리지 않았는지 확인하세요."
+            ) from e
     else:
         # 인증: env 파일 경로 → credentials/ → .keys/ops-robot-keys.json
         cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -733,8 +746,17 @@ def create_google_sheet(
                     "GOOGLE_APPLICATION_CREDENTIALS(키 파일 경로)를 설정하세요."
                 )
         creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
+    try:
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(TARGET_SPREADSHEET_ID)
+    except Exception as e:
+        hint = (
+            f"구글 시트 API 오류 ({type(e).__name__}): {e}. "
+            "① Railway Variables에 GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체) 설정 "
+            "② 해당 JSON의 client_email을 스프레드시트에 편집자로 공유 "
+            "③ Google Cloud 콘솔에서 'Google Sheets API' 사용 설정"
+        )
+        raise RuntimeError(hint) from e
 
     # payroll_result 원본 시트 (화면에서 수정 반영된 데이터 그대로 반출)
     sheet_title_payroll = f"{payroll_year}년{payroll_month:02d}월_payroll_result"

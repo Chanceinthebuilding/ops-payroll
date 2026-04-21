@@ -881,8 +881,13 @@
               var err =
                 (data && (data.error || data.message || data.detail)) ||
                 ('HTTP ' + res.httpStatus + (data && data.ok === false ? ' (ok:false)' : ''));
-              if (!err || String(err).trim() === '') {
-                err = '보내기 실패(서버 메시지 없음). Railway Variables에 GOOGLE_APPLICATION_CREDENTIALS_JSON을 넣었는지 확인하세요.';
+              if (
+                !err ||
+                String(err).trim() === '' ||
+                /^내보내기 실패:\s*$/.test(String(err))
+              ) {
+                err =
+                  '보내기 실패(서버 메시지 없음). Railway에 GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 전체), 스프레드시트 공유(client_email), Google Sheets API 사용 설정을 확인하세요.';
               }
               showMsg(String(err), true);
             }
