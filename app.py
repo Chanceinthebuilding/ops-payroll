@@ -496,8 +496,25 @@ def _normalize_employee_id_val(val):
         return s
 
 
-def _load_fm_roster_pairs(path: Path):
-    """FM 목록 xlsx에서 (사번, 역할) 정규화 테이블. 실패 시 None."""
+def _normalize_fm_person_name(val) -> str:
+    """FM 목록·급여 이름 매칭용: 공백 정리."""
+    import pandas as pd
+
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    s = str(val).strip()
+    if not s or s.lower() == "nan":
+        return ""
+    return " ".join(s.split())
+
+
+def _load_fm_roster_data(path: Path):
+    """
+    FM 목록 xlsx → (사번→역할 DataFrame, 이름→역할 dict).
+    - 사번이 있는 행만 eid 테이블에 포함(기존과 동일).
+    - 사번이 비어 있고 이름 컬럼이 있으면 이름→역할 보조 매칭(급여 employee_name과 연결).
+    이름 컬럼 후보: 이름, 성명
+    """
     import pandas as pd
 
     if not path.is_file():
@@ -512,16 +529,47 @@ def _load_fm_roster_pairs(path: Path):
     df.columns = [str(c).strip() for c in df.columns]
     if "사번" not in df.columns or "역할" not in df.columns:
         return None
-    out = pd.DataFrame(
-        {
-            "eid_norm": df["사번"].map(_normalize_employee_id_val),
-            "fm_role": df["역할"].astype(str).str.strip(),
-        }
-    )
+
+    name_col = None
+    for c in ("이름", "성명"):
+        if c in df.columns:
+            name_col = c
+            break
+
+    roles = df["역할"].astype(str).str.strip()
+    eid_norm = df["사번"].map(_normalize_employee_id_val)
+    out = pd.DataFrame({"eid_norm": eid_norm, "fm_role": roles})
     out = out[out["eid_norm"].str.len() > 0].drop_duplicates(subset=["eid_norm"], keep="last")
-    if out.empty:
+
+    name_to_role: dict[str, str] = {}
+    if name_col is not None:
+        for _, row in df.iterrows():
+            eid = _normalize_employee_id_val(row.get("사번"))
+            if eid:
+                continue
+            nm = _normalize_fm_person_name(row.get(name_col))
+            role = str(row.get("역할", "")).strip()
+            if nm and role:
+                name_to_role[nm] = role  # 동명이인이면 시트 아래 행이 우선(keep last)
+
+    if out.empty and not name_to_role:
         return None
-    return out
+    return out, name_to_role
+
+
+def _load_fm_roster_pairs(path: Path):
+    """FM 목록 xlsx에서 (사번, 역할) 정규화 테이블. 이름만 있는 행은 빈 DataFrame + 별도 매핑으로 처리."""
+    import pandas as pd
+
+    r = _load_fm_roster_data(path)
+    if r is None:
+        return None
+    pairs, name_map = r
+    if pairs.empty and not name_map:
+        return None
+    if pairs.empty:
+        return pd.DataFrame(columns=["eid_norm", "fm_role"])
+    return pairs
 
 
 def _build_dashboard_context(output_dir: Path):
@@ -636,15 +684,25 @@ def _build_dashboard_context(output_dir: Path):
     last_date = daily_cost["date_key"].iloc[-1] if len(daily_cost) else "-"
 
     fm_path = output_dir / FM_ROSTER_FILENAME
-    fm_pairs = _load_fm_roster_pairs(fm_path)
-    fm_roster_ready = fm_pairs is not None
+    fm_roster_data = _load_fm_roster_data(fm_path)
+    fm_roster_ready = fm_roster_data is not None
     fm_role_rows: list[dict] = []
     fm_matched_in_payroll = 0
     fm_payroll_rows = int(len(payroll))
     if fm_roster_ready and "employee_id" in payroll.columns and "total_pay" in payroll.columns:
+        fm_pairs, fm_name_to_role = fm_roster_data
+        if fm_pairs.empty:
+            fm_pairs = pd.DataFrame(columns=["eid_norm", "fm_role"])
         pm = payroll.copy()
         pm["eid_norm"] = pm["employee_id"].map(_normalize_employee_id_val)
+        if "employee_name" in pm.columns:
+            pm["name_norm"] = pm["employee_name"].map(_normalize_fm_person_name)
+        else:
+            pm["name_norm"] = ""
         merged = pm.merge(fm_pairs, on="eid_norm", how="left")
+        if fm_name_to_role:
+            miss = merged["fm_role"].isna() & (merged["name_norm"].str.len() > 0)
+            merged.loc[miss, "fm_role"] = merged.loc[miss, "name_norm"].map(fm_name_to_role)
         fm_matched_in_payroll = int(merged["fm_role"].notna().sum())
         merged["fm_role"] = merged["fm_role"].fillna("(FM 목록 없음)")
         tpm = merged["total_pay"].apply(_to_num)
@@ -1324,12 +1382,13 @@ def admin_fm_roster():
         FM_ROSTER_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
         dest = FM_ROSTER_LOCAL_PATH
         f.save(str(dest))
-        pairs = _load_fm_roster_pairs(dest)
-        if pairs is None:
+        fm_data = _load_fm_roster_data(dest)
+        if fm_data is None:
             dest.unlink(missing_ok=True)
             flash("FM 엑셀에 필수 컬럼(사번, 역할)이 없거나 내용을 읽을 수 없습니다.", "error")
             return redirect(url_for("admin_data"))
-        n = len(pairs)
+        pairs, name_map = fm_data
+        n = int(len(pairs)) + int(len(name_map))
         if gcs_enabled():
             ct = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             if dest.suffix.lower() == ".xls":
@@ -1354,7 +1413,10 @@ def admin_fm_roster():
                 json.dumps(fm_meta, ensure_ascii=False, indent=2),
                 _fm_upload_meta_blob_name(),
             )
-        flash(f"FM 기본정보를 반영했습니다. (고유 사번 {n}건, 대시보드 역할별 집계에 사용)", "success")
+        flash(
+            f"FM 기본정보를 반영했습니다. (사번 {len(pairs)}건 + 이름 보조 {len(name_map)}건 = 매칭 키 {n}건, 대시보드 역할별 집계에 사용)",
+            "success",
+        )
     except Exception as e:
         logger.exception("FM roster upload")
         flash(f"FM 파일 저장 실패: {e}", "error")

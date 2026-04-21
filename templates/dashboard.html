@@ -121,7 +121,7 @@
       <article class="card" style="grid-column: 1 / -1;">
         <h2>역할(FM 목록)별 급여 집계</h2>
         <p class="sub" style="margin: 0 0 12px; font-size: 0.88rem;">
-          급여 테이블 사번과 FM 목록을 매칭했습니다.
+          급여 테이블의 사번(또는 사번 없으면 이름)과 FM 목록을 매칭했습니다.
           (매칭됨 <strong>{{ fm_matched_in_payroll }}</strong> / 급여 행 <strong>{{ fm_payroll_rows }}</strong>)
         </p>
         <table>
@@ -143,7 +143,7 @@
     {% else %}
     <section class="layout" style="margin-bottom: 14px;">
       <article class="muted-card" style="grid-column: 1 / -1;">
-        <p style="margin:0 0 8px;"><strong>역할별 집계</strong>를 보려면 관리자가 <a class="link" href="{{ url_for('admin_data') }}">관리자 데이터</a>에서 <strong>FM 기본정보</strong> xlsx(컬럼: 사번, 역할)를 업로드하세요.</p>
+        <p style="margin:0 0 8px;"><strong>역할별 집계</strong>를 보려면 관리자가 <a class="link" href="{{ url_for('admin_data') }}">관리자 데이터</a>에서 <strong>FM 기본정보</strong> xlsx(필수: 사번, 역할 · 사번 없을 때 선택: 이름 또는 성명)를 업로드하세요.</p>
         <p style="margin:0; font-size:0.88rem;">파일은 GCS <code>metadata/fm_roster.xlsx</code> 로 최신만 유지됩니다.</p>
       </article>
     </section>
