@@ -61,6 +61,23 @@ _gcs_storage_loaded = False
 _gcs_storage_mod = None
 logger = logging.getLogger(__name__)
 
+
+def _normalize_google_credentials_env() -> None:
+    """
+    GOOGLE_APPLICATION_CREDENTIALS_JSON(서비스 계정 JSON 문자열)이 있으면
+    GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 무시한다. 둘 다 두면 google-auth 등이
+    파일 경로를 읽으려다 Railway에서 PermissionError가 나는 경우가 많다.
+    """
+    if (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON") or "").strip():
+        removed = os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        if removed:
+            logger.info(
+                "GOOGLE_APPLICATION_CREDENTIALS_JSON이 있어 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 사용하지 않습니다."
+            )
+
+
+_normalize_google_credentials_env()
+
 # 배포·업데이트마다 패치 번호를 올리거나, Railway 변수 APP_VERSION(예: 1.0.1 또는 v1.0.1)으로 덮어씀
 APP_VERSION_DEFAULT = "1.0.0"
 

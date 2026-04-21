@@ -806,9 +806,9 @@ def create_google_sheet(
             except PermissionError as e:
                 fn = getattr(e, "filename", None)
                 raise RuntimeError(
-                    f"구글 시트 접근 PermissionError{f': {fn}' if fn else ''}. "
-                    "Railway Variables에서 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)를 삭제하고 "
-                    "GOOGLE_APPLICATION_CREDENTIALS_JSON만 두세요(둘 다 있으면 일부 라이브러리가 경로를 읽으려다 실패할 수 있음)."
+                    f"PermissionError{f' ({fn})' if fn else ''}. "
+                    "Railway에는 GOOGLE_APPLICATION_CREDENTIALS_JSON만 두고, "
+                    "이름이 다른 GOOGLE_APPLICATION_CREDENTIALS(파일 경로)는 삭제하세요."
                 ) from e
             except Exception as e:
                 hint = (
