@@ -206,7 +206,10 @@ def commercialization_dashboard():
     rows_order = list(data.get("rows_order_fm", []))
     role_totals = _commercialization_role_totals_from_dashboard_cache()
     _apply_commercialization_role_override(rows_fm, rows_log, rows_order, role_totals, target_ym="2026-04")
-    chart_ctx = _build_commercialization_unit_line_chart(rows_fm, rows_log, rows_order, y_min=0, y_max=8000)
+    _apply_unit_color_scale(rows_fm)
+    _apply_unit_color_scale(rows_log)
+    _apply_unit_color_scale(rows_order)
+    chart_ctx = _build_commercialization_unit_line_chart(rows_fm, rows_log, rows_order, y_min=0, y_max=6000)
 
     return render_template(
         "commercialization.html",
@@ -309,6 +312,52 @@ def _recalculate_cost_change_fields(rows: list[dict]) -> None:
         prev_unit = unit_val
 
 
+def _apply_unit_color_scale(rows: list[dict]) -> None:
+    values = [int(r.get("unit")) for r in rows if r.get("unit") is not None]
+    if not values:
+        for r in rows:
+            r["unit_bg"] = "#ffffff"
+        return
+
+    lo = min(values)
+    hi = max(values)
+    mid = (lo + hi) / 2.0
+
+    def _lerp(a: int, b: int, t: float) -> int:
+        return int(round(a + (b - a) * t))
+
+    def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+        return "#{:02x}{:02x}{:02x}".format(*rgb)
+
+    red = (248, 113, 113)
+    white = (255, 255, 255)
+    green = (74, 222, 128)
+
+    for r in rows:
+        v = r.get("unit")
+        if v is None or lo == hi:
+            r["unit_bg"] = "#ffffff"
+            continue
+        fv = float(v)
+        if fv <= mid:
+            denom = max(1e-9, (mid - lo))
+            t = (fv - lo) / denom
+            rgb = (
+                _lerp(red[0], white[0], t),
+                _lerp(red[1], white[1], t),
+                _lerp(red[2], white[2], t),
+            )
+        else:
+            denom = max(1e-9, (hi - mid))
+            t = (fv - mid) / denom
+            rgb = (
+                _lerp(white[0], green[0], t),
+                _lerp(white[1], green[1], t),
+                _lerp(white[2], green[2], t),
+            )
+        r["unit_bg"] = _rgb_to_hex(rgb)
+
+
 def _apply_commercialization_role_override(
     rows_fm: list[dict],
     rows_logistics: list[dict],
@@ -375,9 +424,9 @@ def _build_commercialization_unit_line_chart(
     y_max: int,
 ) -> dict:
     labels = sorted({str(r.get("ym")) for r in (rows_fm + rows_logistics + rows_order_fm) if r.get("ym")})
-    width = 1080
-    height = 300
-    pad_l, pad_r, pad_t, pad_b = 60, 24, 20, 44
+    width = 1380
+    height = 340
+    pad_l, pad_r, pad_t, pad_b = 70, 26, 20, 62
     plot_w = max(1, width - pad_l - pad_r)
     plot_h = max(1, height - pad_t - pad_b)
 
@@ -397,25 +446,53 @@ def _build_commercialization_unit_line_chart(
         by = {str(r.get("ym")): r for r in rows}
         points_xy: list[str] = []
         dots: list[dict] = []
+        values_by_month: dict[str, int | None] = {}
         for i, ym in enumerate(labels):
             rv = by.get(ym) or {}
             v = rv.get("unit")
+            values_by_month[ym] = int(v) if v is not None else None
             xv = _x(i, len(labels))
             yv = _y(int(v) if v is not None else None)
             if yv is None:
                 continue
             points_xy.append(f"{xv:.2f},{yv:.2f}")
             dots.append({"x": round(xv, 2), "y": round(yv, 2), "label": ym, "value": int(v)})
-        return {"key": key, "color": color, "points": " ".join(points_xy), "dots": dots}
+        return {"key": key, "color": color, "points": " ".join(points_xy), "dots": dots, "values_by_month": values_by_month}
 
     ticks = []
-    for v in [0, 2000, 4000, 6000, 8000]:
+    for v in [0, 1500, 3000, 4500, 6000]:
         yv = _y(v)
         if yv is None:
             continue
         ticks.append({"value": v, "y": round(yv, 2)})
 
-    x_ticks = [{"label": ym, "x": round(_x(i, len(labels)), 2)} for i, ym in enumerate(labels)]
+    step = max(1, (len(labels) + 11) // 12)
+    x_ticks = [
+        {"label": ym, "x": round(_x(i, len(labels)), 2), "show": (i % step == 0) or (i == len(labels) - 1)}
+        for i, ym in enumerate(labels)
+    ]
+
+    month_tooltips: dict[str, dict] = {}
+    month_bands: list[dict] = []
+    n = len(labels)
+    for i, ym in enumerate(labels):
+        x_curr = _x(i, n)
+        x_prev = _x(i - 1, n) if i > 0 else x_curr
+        x_next = _x(i + 1, n) if i < (n - 1) else x_curr
+        left = (x_prev + x_curr) / 2 if i > 0 else x_curr - ((x_next - x_curr) / 2 if n > 1 else 18)
+        right = (x_curr + x_next) / 2 if i < (n - 1) else x_curr + ((x_curr - x_prev) / 2 if n > 1 else 18)
+        month_bands.append({"ym": ym, "x": round(left, 2), "w": round(max(6.0, right - left), 2)})
+        month_tooltips[ym] = {"ym": ym}
+
+    series_rows = [
+        _series(rows_fm, "상품화 FM", "#2563eb"),
+        _series(rows_logistics, "상품화+물류 FM", "#16a34a"),
+        _series(rows_order_fm, "주문 FM", "#7c3aed"),
+    ]
+    for s in series_rows:
+        key = s["key"]
+        for ym in labels:
+            month_tooltips[ym][key] = s["values_by_month"].get(ym)
 
     return {
         "width": width,
@@ -426,11 +503,9 @@ def _build_commercialization_unit_line_chart(
         "plot_bottom": height - pad_b,
         "y_ticks": ticks,
         "x_ticks": x_ticks,
-        "series": [
-            _series(rows_fm, "상품화 FM", "#2563eb"),
-            _series(rows_logistics, "상품화+물류 FM", "#16a34a"),
-            _series(rows_order_fm, "주문 FM", "#7c3aed"),
-        ],
+        "month_bands": month_bands,
+        "month_tooltips": month_tooltips,
+        "series": series_rows,
     }
 
 

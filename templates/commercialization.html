@@ -15,7 +15,7 @@
       color: #0f172a;
       background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
     }
-    .page { max-width: min(1600px, 98vw); margin: 0 auto; }
+    .page { max-width: min(1920px, 99vw); margin: 0 auto; }
     h1 { margin: 2px 0 4px; font-size: 1.85rem; font-weight: 700; letter-spacing: -0.02em; }
     .sub { margin: 0 0 16px; color: #64748b; font-size: 0.92rem; line-height: 1.55; }
     .filter {
@@ -64,7 +64,7 @@
       border-radius: 16px;
       padding: 14px 12px 16px;
       box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
-      overflow-x: auto;
+      overflow-x: visible;
     }
     .chart-card {
       background: rgba(255, 255, 255, 0.82);
@@ -85,9 +85,27 @@
       font-weight: 600;
     }
     .chart-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; margin-right: 6px; }
-    .chart-wrap { overflow-x: auto; }
-    .chart-svg { min-width: 980px; width: 100%; height: auto; }
+    .chart-wrap { position: relative; overflow: hidden; }
+    .chart-svg { width: 100%; height: auto; }
+    .chart-band { fill: transparent; cursor: crosshair; }
     .y-label, .x-label { fill: #64748b; font-size: 11px; }
+    .line-tip {
+      position: absolute;
+      pointer-events: none;
+      display: none;
+      z-index: 10;
+      min-width: 188px;
+      max-width: 260px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.92);
+      color: #f8fafc;
+      font-size: 0.76rem;
+      line-height: 1.5;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.24);
+    }
+    .line-tip .m { font-weight: 800; margin-bottom: 6px; display: block; }
+    .line-tip .r { display: flex; justify-content: space-between; gap: 10px; }
     .panel h2 {
       margin: 0 0 10px;
       font-size: 0.95rem;
@@ -101,8 +119,8 @@
       color: #64748b;
       line-height: 1.45;
     }
-    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; min-width: 720px; }
-    th, td { padding: 8px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.76rem; table-layout: fixed; }
+    th, td { padding: 8px 6px; border-bottom: 1px solid #e2e8f0; text-align: center; vertical-align: middle; }
     th {
       color: #334155;
       font-size: 0.72rem;
@@ -111,9 +129,9 @@
       white-space: nowrap;
       background: #f8fafc;
     }
-    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    td.num { text-align: center; font-variant-numeric: tabular-nums; }
     td.hl { background: #fffbeb; }
-    td.remark { color: #475569; font-size: 0.76rem; max-width: 220px; }
+    td.remark { color: #475569; font-size: 0.74rem; word-break: keep-all; }
     a.link { color: #1d4ed8; font-weight: 700; text-decoration: none; }
     a.link:hover { text-decoration: underline; }
   </style>
@@ -148,13 +166,13 @@
 
     <section class="chart-card">
       <h2 style="margin: 0 0 8px; font-size: 0.95rem;">월별 인건비 추이 (단위: 원)</h2>
-      <p class="cap" style="margin-bottom: 8px;">X축: 연월 · Y축: 금액 (0 ~ 8,000)</p>
+      <p class="cap" style="margin-bottom: 8px;">X축: 연월 · Y축: 금액 (0 ~ 6,000)</p>
       <div class="chart-legend">
         <span><i class="chart-dot" style="background:#2563eb;"></i>상품화 FM</span>
         <span><i class="chart-dot" style="background:#16a34a;"></i>상품화+물류 FM</span>
         <span><i class="chart-dot" style="background:#7c3aed;"></i>주문 FM</span>
       </div>
-      <div class="chart-wrap">
+      <div class="chart-wrap" id="lineChartWrap">
         <svg class="chart-svg" viewBox="0 0 {{ chart_ctx.width }} {{ chart_ctx.height }}" role="img" aria-label="월별 인건비 꺾은선 그래프">
           {% for t in chart_ctx.y_ticks %}
           <line x1="{{ chart_ctx.plot_left }}" y1="{{ t.y }}" x2="{{ chart_ctx.plot_right }}" y2="{{ t.y }}" stroke="#e2e8f0" stroke-width="1"></line>
@@ -175,10 +193,17 @@
             {% endfor %}
           {% endfor %}
 
+          {% for b in chart_ctx.month_bands %}
+          <rect class="chart-band" data-month="{{ b.ym }}" x="{{ b.x }}" y="{{ chart_ctx.plot_top }}" width="{{ b.w }}" height="{{ chart_ctx.plot_bottom - chart_ctx.plot_top }}"></rect>
+          {% endfor %}
+
           {% for xt in chart_ctx.x_ticks %}
-          <text class="x-label" x="{{ xt.x }}" y="{{ chart_ctx.plot_bottom + 18 }}" text-anchor="middle">{{ xt.label }}</text>
+          {% if xt.show %}
+          <text class="x-label" x="{{ xt.x }}" y="{{ chart_ctx.plot_bottom + 20 }}" text-anchor="end" transform="rotate(-35 {{ xt.x }} {{ chart_ctx.plot_bottom + 20 }})">{{ xt.label }}</text>
+          {% endif %}
           {% endfor %}
         </svg>
+        <div class="line-tip" id="lineChartTip"></div>
       </div>
     </section>
 
@@ -207,7 +232,7 @@
               <td class="num">{{ fmt_pct(r.chg_cnt) }}</td>
               <td class="num">{{ "{:,}".format(r.cost) }}</td>
               <td class="num">{{ fmt_pct(r.chg_cost) }}</td>
-              <td class="num hl">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
+              <td class="num hl" style="background: {{ r.unit_bg or '#ffffff' }};">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
               <td class="num">{{ fmt_pct(r.chg_unit) }}</td>
               <td class="remark">{{ r.remark }}</td>
             </tr>
@@ -240,7 +265,7 @@
               <td class="num">{{ fmt_pct(r.chg_cnt) }}</td>
               <td class="num">{{ "{:,}".format(r.cost) }}</td>
               <td class="num">{{ fmt_pct(r.chg_cost) }}</td>
-              <td class="num hl">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
+              <td class="num hl" style="background: {{ r.unit_bg or '#ffffff' }};">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
               <td class="num">{{ fmt_pct(r.chg_unit) }}</td>
               <td class="remark">{{ r.remark }}</td>
             </tr>
@@ -272,7 +297,7 @@
               <td class="num">{{ fmt_pct(r.chg_cnt) }}</td>
               <td class="num">{{ "{:,}".format(r.cost) }}</td>
               <td class="num">{{ fmt_pct(r.chg_cost) }}</td>
-              <td class="num hl">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
+              <td class="num hl" style="background: {{ r.unit_bg or '#ffffff' }};">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
               <td class="num">{{ fmt_pct(r.chg_unit) }}</td>
               <td class="remark">{{ r.remark }}</td>
             </tr>
@@ -287,5 +312,50 @@
     </p>
     {% endif %}
   </div>
+  {% if commercialization_ready %}
+  <script>
+    (function () {
+      const wrap = document.getElementById("lineChartWrap");
+      const tip = document.getElementById("lineChartTip");
+      if (!wrap || !tip) return;
+      const data = {{ chart_ctx.month_tooltips | tojson }};
+      const bands = wrap.querySelectorAll(".chart-band");
+      const fmt = (v) => (typeof v === "number" ? v.toLocaleString("ko-KR") + "원" : "—");
+
+      function render(month) {
+        const row = data[month];
+        if (!row) return;
+        tip.innerHTML = `
+          <span class="m">${month}</span>
+          <div class="r"><span>상품화 FM</span><strong>${fmt(row["상품화 FM"])}</strong></div>
+          <div class="r"><span>상품화+물류 FM</span><strong>${fmt(row["상품화+물류 FM"])}</strong></div>
+          <div class="r"><span>주문 FM</span><strong>${fmt(row["주문 FM"])}</strong></div>
+        `;
+      }
+
+      function moveAt(e) {
+        const rect = wrap.getBoundingClientRect();
+        const x = e.clientX - rect.left + 12;
+        const y = e.clientY - rect.top - 12;
+        tip.style.left = `${Math.min(rect.width - 210, Math.max(8, x))}px`;
+        tip.style.top = `${Math.max(8, y - tip.offsetHeight)}px`;
+      }
+
+      bands.forEach((el) => {
+        el.addEventListener("mouseenter", (e) => {
+          const month = el.getAttribute("data-month");
+          if (!month) return;
+          render(month);
+          tip.style.display = "block";
+          moveAt(e);
+        });
+        el.addEventListener("mousemove", moveAt);
+        el.addEventListener("mouseleave", () => {
+          tip.style.display = "none";
+        });
+      });
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>
