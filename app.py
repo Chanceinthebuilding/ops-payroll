@@ -367,6 +367,8 @@ def _apply_commercialization_role_override(
     role_totals: dict[str, int],
     *,
     target_ym: str,
+    tax_apply_from_ym: str = "2026-04",
+    tax_multiplier: float = 0.9,
 ) -> None:
     base_fm = int(role_totals.get("tagging_krw", 0)) + int(role_totals.get("cleaning_krw", 0)) + int(
         role_totals.get("shooting_krw", 0)
@@ -394,6 +396,11 @@ def _apply_commercialization_role_override(
         return new_row
 
     row_fm = _ensure_row(rows_fm)
+    # 2026-04부터는 세금 10% 차감(= 0.9배) 기준으로 기입
+    if target_ym >= tax_apply_from_ym:
+        base_fm = int(round(base_fm * tax_multiplier))
+        logistics = int(round(logistics * tax_multiplier))
+
     row_fm["cost"] = base_fm
     cnt = int(row_fm.get("cnt") or 0)
     row_fm["unit"] = int(round(base_fm / cnt)) if cnt > 0 else None
