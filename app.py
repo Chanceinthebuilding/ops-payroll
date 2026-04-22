@@ -99,7 +99,7 @@ def _normalize_google_credentials_env() -> None:
 _normalize_google_credentials_env()
 
 # 배포·업데이트마다 패치 번호를 올리거나, Railway 변수 APP_VERSION(예: 1.0.1 또는 v1.0.1)으로 덮어씀
-APP_VERSION_DEFAULT = "1.0.0"
+APP_VERSION_DEFAULT = "1.5.0"
 
 
 def app_version_display() -> str:
