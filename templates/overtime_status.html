@@ -10,21 +10,32 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 28px 16px 40px;
+      padding: 28px 10px 40px;
       font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       color: #0f172a;
       background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
     }
-    .page { max-width: min(1700px, 99vw); margin: 0 auto; }
+    /* 넓은 모니터에서 좌우 여백만 쓰이지 않도록 전체 폭 사용 + sticky 열 폭 변수 */
+    .page {
+      --ov-col-role: 76px;
+      --ov-col-name: 118px;
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 0 4px;
+      box-sizing: border-box;
+    }
     h1 { margin: 2px 0 6px; font-size: 1.9rem; font-weight: 700; letter-spacing: -0.02em; }
     .sub { margin: 0 0 16px; color: #64748b; font-size: 0.9rem; line-height: 1.6; }
     .card {
       background: rgba(255, 255, 255, 0.82);
       border: 1px solid rgba(255, 255, 255, 0.9);
       border-radius: 18px;
-      padding: 16px 14px;
+      padding: 16px 10px;
       box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
       max-height: 74vh;
+      width: 100%;
+      box-sizing: border-box;
       overflow: auto;
     }
     .muted-card {
@@ -35,7 +46,13 @@
       color: #475569;
       line-height: 1.6;
     }
-    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.78rem; min-width: 1080px; }
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.78rem;
+      min-width: 1080px;
+    }
     th, td { padding: 4px 5px; border-right: 1px solid #b8c2d4; border-bottom: 1px solid #b8c2d4; text-align: center; }
     th {
       color: #334155;
@@ -57,28 +74,46 @@
       z-index: 7;
       background: #f3f4f6 !important;
     }
+    /* 고정 열 폭: 두 번째 sticky의 left는 첫 열 border-box 너비와 동일해야 함 */
     th.left-sticky-2, td.left-sticky-2 {
       position: sticky;
-      left: 138px;
+      left: var(--ov-col-role);
       z-index: 7;
       background: #f3f4f6 !important;
     }
-    th.left-sticky { min-width: 132px; }
-    td.left-sticky { min-width: 132px; font-weight: 700; color: #1e293b; }
-    th.left-sticky-2, td.left-sticky-2 { min-width: 150px; }
-    td.left-sticky-2 { color: #334155; }
+    th.left-sticky, td.left-sticky {
+      box-sizing: border-box;
+      width: var(--ov-col-role);
+      min-width: var(--ov-col-role);
+      max-width: var(--ov-col-role);
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+    td.left-sticky { font-weight: 700; color: #1e293b; text-align: center; }
+    th.left-sticky-2, td.left-sticky-2 {
+      box-sizing: border-box;
+      width: var(--ov-col-name);
+      min-width: var(--ov-col-name);
+      max-width: var(--ov-col-name);
+      padding-left: 4px;
+      padding-right: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    td.left-sticky-2 { color: #334155; text-align: center; }
     .weekday-head { background: #f8fafc; }
     .weekend-head { background: #fdf2e3; }
     td.editable {
       min-width: 50px;
-      text-align: right;
+      text-align: center;
       font-variant-numeric: tabular-nums;
       background: #fcfdff;
       outline: none;
     }
     td.readonly {
       min-width: 50px;
-      text-align: right;
+      text-align: center;
       color: #334155;
       font-variant-numeric: tabular-nums;
       background: #ffffff;
@@ -90,7 +125,7 @@
       z-index: 6;
       background: #fce7f3 !important;
       min-width: 66px;
-      text-align: right;
+      text-align: center;
       font-variant-numeric: tabular-nums;
       font-weight: 700;
     }
@@ -176,6 +211,7 @@
       font-size: 0.72rem;
       font-weight: 700;
       background: #f8fafc;
+      text-align: center;
     }
     tfoot td.total-label {
       position: sticky;
@@ -250,7 +286,7 @@
             <td class="left-sticky">
               <span class="role-tag">{{ r.role }}</span>
             </td>
-            <td class="left-sticky-2">{{ r.display_name }}</td>
+            <td class="left-sticky-2" title="{{ r.display_name }}">{{ r.display_name }}</td>
             {% for d in date_headers %}
             <td
               class="{% if can_save %}editable{% else %}readonly{% endif %} {% if d.is_weekend %}weekend-cell{% endif %}"
