@@ -159,50 +159,47 @@ def dashboard():
 
 @app.route("/commercialization")
 def commercialization_dashboard():
-    """월별 상품화 개수·FM 인건비(태깅+클리닝+촬영 / +물류) 대시보드. DB 환경변수 필요."""
+    """월별 상품화 FM 인건비 대시보드(구글 시트 연동)."""
     if not _can_current_user("commercialization", "view"):
         flash("상품화 인건비 조회 권한이 없습니다.", "error")
         return redirect(url_for("index"))
-    from commercialization_metrics import (
-        build_table_rows,
-        db_config_error_message,
+    from commercialization_sheet import (
         default_range_ym,
-        fetch_labor_monthly,
-        fetch_productized_monthly,
+        fetch_dashboard_rows,
         fmt_pct,
-        has_db_config,
-        load_remarks,
     )
-
-    if not has_db_config():
-        return render_template(
-            "commercialization.html",
-            commercialization_ready=False,
-            commercialization_error=db_config_error_message(),
-            range_start="",
-            range_end="",
-            rows_fm=None,
-            rows_logistics=None,
-            fmt_pct=fmt_pct,
-            labor_sql_configured=False,
-        )
 
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     if not start or not end:
-        start, end = default_range_ym()
+        try:
+            start, end = default_range_ym()
+        except Exception as e:
+            return render_template(
+                "commercialization.html",
+                commercialization_ready=False,
+                commercialization_error=f"구글 시트 조회 실패: {e}",
+                range_start="",
+                range_end="",
+                rows_fm=[],
+                rows_logistics=[],
+                rows_order_fm=[],
+                fmt_pct=fmt_pct,
+            )
 
-    productized, err_p = fetch_productized_monthly(start, end)
-    labor, err_l = fetch_labor_monthly()
-    labor_sql_configured = bool((os.environ.get("COMMERCIALIZATION_LABOR_MONTHLY_SQL") or "").strip())
-
-    err = None
-    if err_p or err_l:
-        err = " ".join(s for s in (err_p, err_l) if s)
-    remarks = load_remarks(COMMERCIALIZATION_REMARKS_PATH)
-
-    rows_fm = build_table_rows(productized, labor, remarks, include_logistics=False)
-    rows_log = build_table_rows(productized, labor, remarks, include_logistics=True)
+    data, err = fetch_dashboard_rows(start, end)
+    if err:
+        return render_template(
+            "commercialization.html",
+            commercialization_ready=False,
+            commercialization_error=err,
+            range_start=start,
+            range_end=end,
+            rows_fm=[],
+            rows_logistics=[],
+            rows_order_fm=[],
+            fmt_pct=fmt_pct,
+        )
 
     return render_template(
         "commercialization.html",
@@ -210,10 +207,10 @@ def commercialization_dashboard():
         commercialization_error=err,
         range_start=start,
         range_end=end,
-        rows_fm=rows_fm,
-        rows_logistics=rows_log,
+        rows_fm=data.get("rows_fm", []),
+        rows_logistics=data.get("rows_logistics", []),
+        rows_order_fm=data.get("rows_order_fm", []),
         fmt_pct=fmt_pct,
-        labor_sql_configured=labor_sql_configured,
     )
 
 
