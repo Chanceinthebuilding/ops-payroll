@@ -134,6 +134,89 @@
       line-height: 1.5;
     }
     .upload-meta-line strong { color: #334155; font-weight: 600; word-break: break-all; }
+    .admin-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.95fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .panel {
+      border: 1px solid rgba(226, 232, 240, 0.92);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+      padding: 16px 14px;
+    }
+    .perm-title {
+      margin: 0 0 8px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .perm-help {
+      margin: 0 0 12px;
+      color: #64748b;
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+    .perm-meta {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin: 0 0 10px;
+    }
+    .perm-wrap { overflow: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+    table.perm-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      min-width: 690px;
+    }
+    .perm-table th, .perm-table td {
+      border-bottom: 1px solid #e2e8f0;
+      padding: 8px 6px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .perm-table th {
+      background: #f8fafc;
+      color: #334155;
+      font-weight: 700;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .perm-table td.email-cell { text-align: left; min-width: 200px; }
+    .perm-email {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      padding: 7px 9px;
+    }
+    .perm-radio-group { display: inline-flex; gap: 6px; white-space: nowrap; }
+    .perm-radio-group label { font-size: 0.7rem; color: #334155; cursor: pointer; }
+    .perm-controls {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .btn-light {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      color: #1e293b;
+      box-shadow: none;
+    }
+    .btn-danger {
+      border: 1px solid #fecaca;
+      background: #fff1f2;
+      color: #b91c1c;
+      box-shadow: none;
+      min-width: 62px;
+    }
+    @media (max-width: 1240px) {
+      .admin-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -151,47 +234,98 @@
         {% endif %}
       {% endwith %}
 
-      <form action="{{ url_for('admin_data') }}" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
-        <p class="section-title">1. 출퇴근 엑셀 (필수)</p>
-        <p class="upload-meta-line">마지막 반영: <strong>{{ upload_last_attendance.filename }}</strong> · {{ upload_last_attendance.when }}</p>
-        <label class="zone" id="dropzone" for="file">
-          <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
-          <p id="label">출퇴근 엑셀을 여기에 끌어다 놓거나 클릭해서 선택하세요</p>
-          <p class="hint">.xlsx, .xls (시프티 출퇴근 형식)</p>
-        </label>
+      <div class="admin-grid">
+        <div class="panel">
+          <form action="{{ url_for('admin_data') }}" method="post" enctype="multipart/form-data" id="form" onsubmit="document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').hidden=false;">
+            <p class="section-title">1. 출퇴근 엑셀 (필수)</p>
+            <p class="upload-meta-line">마지막 반영: <strong>{{ upload_last_attendance.filename }}</strong> · {{ upload_last_attendance.when }}</p>
+            <label class="zone" id="dropzone" for="file">
+              <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
+              <p id="label">출퇴근 엑셀을 여기에 끌어다 놓거나 클릭해서 선택하세요</p>
+              <p class="hint">.xlsx, .xls (시프티 출퇴근 형식)</p>
+            </label>
 
-        <p class="section-title" style="margin-top: 20px;">2. 휴가 엑셀 (선택)</p>
-        <p class="upload-meta-line">마지막 반영(첨부한 경우): <strong>{{ upload_last_leave.filename }}</strong> · {{ upload_last_leave.when }}</p>
-        <label class="zone" id="dropzone2" for="file_leave">
-          <input type="file" name="file_leave" id="file_leave" accept=".xlsx,.xls">
-          <p id="label2">휴가 엑셀을 여기에 넣으세요 (없으면 비워 두세요)</p>
-          <p class="hint">사원번호, 날짜, 휴가유형(유급/무급), 분(또는 시간·일수)</p>
-        </label>
+            <p class="section-title" style="margin-top: 20px;">2. 휴가 엑셀 (선택)</p>
+            <p class="upload-meta-line">마지막 반영(첨부한 경우): <strong>{{ upload_last_leave.filename }}</strong> · {{ upload_last_leave.when }}</p>
+            <label class="zone" id="dropzone2" for="file_leave">
+              <input type="file" name="file_leave" id="file_leave" accept=".xlsx,.xls">
+              <p id="label2">휴가 엑셀을 여기에 넣으세요 (없으면 비워 두세요)</p>
+              <p class="hint">사원번호, 날짜, 휴가유형(유급/무급), 분(또는 시간·일수)</p>
+            </label>
 
-        <div class="footer">
-          <p id="submitMsg" class="hint-inline" hidden>처리 중… (엑셀 크기에 따라 10~30초 걸릴 수 있습니다)</p>
-          <button type="submit" class="btn" id="submitBtn" disabled>결과 업데이트</button>
+            <div class="footer">
+              <p id="submitMsg" class="hint-inline" hidden>처리 중… (엑셀 크기에 따라 10~30초 걸릴 수 있습니다)</p>
+              <button type="submit" class="btn" id="submitBtn" disabled>결과 업데이트</button>
+            </div>
+          </form>
+
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0 22px;">
+
+          <h2 style="margin: 0 0 8px; font-size: 1.15rem; font-weight: 700; color: #0f172a;">FM 기본정보 (선택)</h2>
+          <p class="sub" style="margin-bottom: 8px;">
+            대시보드에서 <strong>역할(팀)별 급여 집계</strong>에 씁니다. 시트 첫 행에 <code>사번</code>, <code>역할</code>이 필수이고, 사번이 없는 행은 <code>이름</code>·<code>성명</code> 또는 <code>닉네임</code>(급여명이 <code>닉네임(실명)</code> 형태일 때)으로 맞추면 역할이 붙습니다.
+            {% if fm_roster_on_disk %}<span style="color:#059669;font-weight:600;">현재 등록됨.</span>{% else %}아직 없음.{% endif %}
+          </p>
+          <p class="upload-meta-line">마지막 반영: <strong>{{ upload_last_fm.filename }}</strong> · {{ upload_last_fm.when }}</p>
+          <form action="{{ url_for('admin_fm_roster') }}" method="post" enctype="multipart/form-data" id="formFm">
+            <label class="zone" id="dropzoneFm" for="file_fm" style="padding: 24px 18px;">
+              <input type="file" name="file_fm" id="file_fm" accept=".xlsx,.xls" required>
+              <p id="labelFm">FM 목록 xlsx를 선택하세요 (예: FM_목록_날짜.xlsx)</p>
+              <p class="hint">저장 시 GCS <code>metadata/fm_roster.xlsx</code> 및 서버 로컬에 반영됩니다.</p>
+            </label>
+            <div class="footer">
+              <button type="submit" class="btn" id="btnFm" style="background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);">FM 목록 저장</button>
+            </div>
+          </form>
         </div>
-      </form>
 
-      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0 22px;">
-
-      <h2 style="margin: 0 0 8px; font-size: 1.15rem; font-weight: 700; color: #0f172a;">FM 기본정보 (선택)</h2>
-      <p class="sub" style="margin-bottom: 8px;">
-        대시보드에서 <strong>역할(팀)별 급여 집계</strong>에 씁니다. 시트 첫 행에 <code>사번</code>, <code>역할</code>이 필수이고, 사번이 없는 행은 <code>이름</code>·<code>성명</code> 또는 <code>닉네임</code>(급여명이 <code>닉네임(실명)</code> 형태일 때)으로 맞추면 역할이 붙습니다.
-        {% if fm_roster_on_disk %}<span style="color:#059669;font-weight:600;">현재 등록됨.</span>{% else %}아직 없음.{% endif %}
-      </p>
-        <p class="upload-meta-line">마지막 반영: <strong>{{ upload_last_fm.filename }}</strong> · {{ upload_last_fm.when }}</p>
-      <form action="{{ url_for('admin_fm_roster') }}" method="post" enctype="multipart/form-data" id="formFm">
-        <label class="zone" id="dropzoneFm" for="file_fm" style="padding: 24px 18px;">
-          <input type="file" name="file_fm" id="file_fm" accept=".xlsx,.xls" required>
-          <p id="labelFm">FM 목록 xlsx를 선택하세요 (예: FM_목록_날짜.xlsx)</p>
-          <p class="hint">저장 시 GCS <code>metadata/fm_roster.xlsx</code> 및 서버 로컬에 반영됩니다.</p>
-        </label>
-        <div class="footer">
-          <button type="submit" class="btn" id="btnFm" style="background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);">FM 목록 저장</button>
-        </div>
-      </form>
+        <aside class="panel">
+          <h2 class="perm-title">권한 관리</h2>
+          <p class="perm-help">이메일 행을 추가하고 화면별 권한을 <strong>없음 / 조회 / 수정</strong>으로 저장하면, 해당 계정은 다음 접속부터 권한이 즉시 적용됩니다.</p>
+          <p class="perm-meta">마지막 저장: {{ permission_updated_at }} · 저장자: {{ permission_updated_by }}</p>
+          {% if can_manage_permissions %}
+          <form method="post" action="{{ url_for('admin_permissions') }}" id="permissionForm">
+            <input type="hidden" name="permissions_payload" id="permissionsPayload">
+            <div class="perm-wrap">
+              <table class="perm-table" id="permissionTable">
+                <thead>
+                  <tr>
+                    <th>이메일</th>
+                    {% for s in permission_scopes %}
+                    <th>{{ s.label }}</th>
+                    {% endfor %}
+                    <th>삭제</th>
+                  </tr>
+                </thead>
+                <tbody id="permissionTbody">
+                  {% for row in permission_rows %}
+                  <tr class="perm-row">
+                    <td class="email-cell"><input type="email" class="perm-email" value="{{ row.email }}" placeholder="name@mineis.io"></td>
+                    {% for s in permission_scopes %}
+                    <td>
+                      <div class="perm-radio-group">
+                        <label><input type="radio" data-scope="{{ s.key }}" value="none" {% if row.get(s.key) == 'none' %}checked{% endif %}>없음</label>
+                        <label><input type="radio" data-scope="{{ s.key }}" value="view" {% if row.get(s.key) == 'view' %}checked{% endif %}>조회</label>
+                        <label><input type="radio" data-scope="{{ s.key }}" value="edit" {% if row.get(s.key) == 'edit' %}checked{% endif %}>수정</label>
+                      </div>
+                    </td>
+                    {% endfor %}
+                    <td><button type="button" class="btn btn-danger perm-del-btn">삭제</button></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="perm-controls">
+              <button type="button" class="btn btn-light" id="btnPermAdd">행 추가</button>
+              <button type="submit" class="btn" id="btnPermSave">권한 저장</button>
+            </div>
+          </form>
+          {% else %}
+          <p class="perm-help" style="margin-top: 12px;">권한 관리 변경은 최고 관리자 계정에서만 가능합니다.</p>
+          {% endif %}
+        </aside>
+      </div>
     </section>
   </div>
 
@@ -252,6 +386,116 @@
       formFm.addEventListener('submit', function() {
         var btn = document.getElementById('btnFm');
         if (btn) btn.disabled = true;
+      });
+    }
+
+    var permForm = document.getElementById('permissionForm');
+    var permTbody = document.getElementById('permissionTbody');
+    var btnPermAdd = document.getElementById('btnPermAdd');
+    var permPayload = document.getElementById('permissionsPayload');
+    var permScopes = [{% for s in permission_scopes %}"{{ s.key }}"{% if not loop.last %}, {% endif %}{% endfor %}];
+    var permLevels = ["none", "view", "edit"];
+
+    function bindPermDelete(btn) {
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        var tr = btn.closest('tr');
+        if (tr) tr.remove();
+      });
+    }
+
+    function refreshPermRadioNames() {
+      if (!permTbody) return;
+      var rows = permTbody.querySelectorAll('tr.perm-row');
+      rows.forEach(function(tr, rowIdx) {
+        permScopes.forEach(function(scope) {
+          var radios = tr.querySelectorAll('input[type="radio"][data-scope="' + scope + '"]');
+          radios.forEach(function(radio) {
+            radio.name = 'perm_' + rowIdx + '_' + scope;
+          });
+        });
+      });
+    }
+
+    function createPermRow(email) {
+      var tr = document.createElement('tr');
+      tr.className = 'perm-row';
+
+      var tdEmail = document.createElement('td');
+      tdEmail.className = 'email-cell';
+      var input = document.createElement('input');
+      input.type = 'email';
+      input.className = 'perm-email';
+      input.placeholder = 'name@mineis.io';
+      input.value = email || '';
+      tdEmail.appendChild(input);
+      tr.appendChild(tdEmail);
+
+      permScopes.forEach(function(scope) {
+        var td = document.createElement('td');
+        var group = document.createElement('div');
+        group.className = 'perm-radio-group';
+        permLevels.forEach(function(level, idx) {
+          var label = document.createElement('label');
+          var radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.value = level;
+          radio.setAttribute('data-scope', scope);
+          if (idx === 0) radio.checked = true;
+          label.appendChild(radio);
+          label.appendChild(document.createTextNode(level === 'none' ? '없음' : (level === 'view' ? '조회' : '수정')));
+          group.appendChild(label);
+        });
+        td.appendChild(group);
+        tr.appendChild(td);
+      });
+
+      var tdDel = document.createElement('td');
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn btn-danger perm-del-btn';
+      delBtn.textContent = '삭제';
+      tdDel.appendChild(delBtn);
+      tr.appendChild(tdDel);
+      bindPermDelete(delBtn);
+      return tr;
+    }
+
+    if (permTbody) {
+      permTbody.querySelectorAll('.perm-del-btn').forEach(bindPermDelete);
+      refreshPermRadioNames();
+    }
+
+    if (btnPermAdd && permTbody) {
+      btnPermAdd.addEventListener('click', function() {
+        permTbody.appendChild(createPermRow(''));
+        refreshPermRadioNames();
+      });
+    }
+
+    if (permForm && permTbody && permPayload) {
+      permForm.addEventListener('submit', function(e) {
+        var rows = [];
+        var seen = {};
+        permTbody.querySelectorAll('tr.perm-row').forEach(function(tr) {
+          var emailInput = tr.querySelector('.perm-email');
+          var email = ((emailInput && emailInput.value) ? emailInput.value : '').trim().toLowerCase();
+          if (!email) return;
+          if (seen[email]) return;
+          seen[email] = true;
+          var row = { email: email };
+          permScopes.forEach(function(scope) {
+            var checked = tr.querySelector('input[type="radio"][data-scope="' + scope + '"]:checked');
+            row[scope] = checked ? checked.value : 'none';
+          });
+          rows.push(row);
+        });
+        if (!rows.length) {
+          e.preventDefault();
+          alert('권한 저장을 위해 최소 1개 계정을 입력해 주세요.');
+          return;
+        }
+        permPayload.value = JSON.stringify(rows);
       });
     }
   </script>

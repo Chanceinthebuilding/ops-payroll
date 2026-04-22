@@ -72,19 +72,38 @@
     {% if auth_enabled %}
     <nav style="display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; font-size:0.82rem;">
       <span style="color:#64748b; font-weight:500;">{{ current_user_email }}</span>
+      {% if can_view_payroll %}
       <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' %}is-active{% endif %}">급여 데이터 관리</a>
+      {% endif %}
+      {% if can_view_dashboard %}
       <a href="{{ url_for('dashboard') }}" class="nav-pill {% if ep == 'dashboard' %}is-active{% endif %}">인건비 대시보드</a>
+      {% endif %}
+      {% if can_view_commercialization %}
       <a href="{{ url_for('commercialization_dashboard') }}" class="nav-pill {% if ep == 'commercialization_dashboard' %}is-active{% endif %}">상품화 인건비</a>
+      {% endif %}
+      {% if can_view_overtime %}
       <a href="{{ url_for('overtime_status') }}" class="nav-pill {% if ep == 'overtime_status' %}is-active{% endif %}">연장근무 현황</a>
+      {% endif %}
+      {% if can_view_admin_data %}
+      <a href="{{ url_for('admin_data') }}" class="nav-pill {% if ep == 'admin_data' %}is-active{% endif %}">관리자 데이터</a>
+      {% endif %}
       <a href="{{ url_for('logout') }}" style="color:#475569;text-decoration:none; padding:6px 10px; border-radius:999px; background:#f8fafc; border:1px solid #e2e8f0; font-weight:600;">로그아웃</a>
     </nav>
     {% else %}
     <nav style="display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; font-size:0.82rem;">
+      {% if can_view_payroll %}
       <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' %}is-active{% endif %}">급여 데이터 관리</a>
+      {% endif %}
+      {% if can_view_dashboard %}
       <a href="{{ url_for('dashboard') }}" class="nav-pill {% if ep == 'dashboard' %}is-active{% endif %}">인건비 대시보드</a>
+      {% endif %}
+      {% if can_view_commercialization %}
       <a href="{{ url_for('commercialization_dashboard') }}" class="nav-pill {% if ep == 'commercialization_dashboard' %}is-active{% endif %}">상품화 인건비</a>
+      {% endif %}
+      {% if can_view_overtime %}
       <a href="{{ url_for('overtime_status') }}" class="nav-pill {% if ep == 'overtime_status' %}is-active{% endif %}">연장근무 현황</a>
-      {% if is_admin_user %}
+      {% endif %}
+      {% if can_view_admin_data %}
       <a href="{{ url_for('admin_data') }}" class="nav-pill {% if ep == 'admin_data' %}is-active{% endif %}">관리자 데이터</a>
       {% endif %}
     </nav>

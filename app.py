@@ -11,6 +11,7 @@ import tempfile
 import time
 import yaml
 from datetime import date, datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 
 try:
@@ -47,6 +48,15 @@ OVERTIME_STATUS_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / OVERTIME_STATUS_FILENAME
 OVERTIME_STATUS_META_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / OVERTIME_STATUS_META_FILENAME
 DASHBOARD_CACHE_FILENAME = "dashboard_cache.json"
 DASHBOARD_CACHE_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / DASHBOARD_CACHE_FILENAME
+PERMISSIONS_FILENAME = "user_permissions.json"
+PERMISSIONS_LOCAL_DIR = FM_ROSTER_LOCAL_DIR / "access_control"
+PERMISSIONS_LOCAL_PATH = PERMISSIONS_LOCAL_DIR / PERMISSIONS_FILENAME
+PERMISSION_SCOPE_KEYS = ("payroll", "dashboard", "overtime", "commercialization", "admin_data")
+PERMISSION_LEVELS = ("none", "view", "edit")
+PERMISSION_LEVEL_RANK = {"none": 0, "view": 1, "edit": 2}
+_PERMISSIONS_CACHE: dict | None = None
+_PERMISSIONS_CACHE_AT = 0.0
+_PERMISSIONS_CACHE_TTL_SEC = int((os.environ.get("PERMISSIONS_CACHE_TTL_SEC") or "15").strip() or "15")
 PUBLISHED_META_FILENAME = "meta.json"
 KST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(ROOT))
@@ -119,6 +129,9 @@ def logout():
 
 @app.route("/dashboard")
 def dashboard():
+    if not _can_current_user("dashboard", "view"):
+        flash("인건비 대시보드 조회 권한이 없습니다.", "error")
+        return redirect(url_for("index"))
     if not _published_exists():
         return render_template("dashboard.html", dashboard_ready=False)
     pmeta = _read_published_meta_dict() or {}
@@ -147,6 +160,9 @@ def dashboard():
 @app.route("/commercialization")
 def commercialization_dashboard():
     """월별 상품화 개수·FM 인건비(태깅+클리닝+촬영 / +물류) 대시보드. DB 환경변수 필요."""
+    if not _can_current_user("commercialization", "view"):
+        flash("상품화 인건비 조회 권한이 없습니다.", "error")
+        return redirect(url_for("index"))
     from commercialization_metrics import (
         build_table_rows,
         db_config_error_message,
@@ -337,6 +353,11 @@ def _overtime_status_meta_blob_name() -> str:
 
 def _dashboard_cache_blob_name() -> str:
     return f"metadata/{DASHBOARD_CACHE_FILENAME}"
+
+
+def _permissions_blob_name() -> str:
+    # 별도 폴더(access-control)로 분리 관리
+    return f"access-control/{PERMISSIONS_FILENAME}"
 
 
 def _fm_roster_exists_remote_or_local() -> bool:
@@ -730,6 +751,188 @@ def _read_fm_upload_meta_dict() -> dict | None:
     return None
 
 
+def _permission_default_levels() -> dict[str, str]:
+    return {
+        "payroll": "view",
+        "dashboard": "view",
+        "overtime": "view",
+        "commercialization": "view",
+        "admin_data": "none",
+    }
+
+
+def _normalize_permission_level(raw, default: str = "none") -> str:
+    v = str(raw or "").strip().lower()
+    if v in PERMISSION_LEVELS:
+        return v
+    return default
+
+
+def _clean_permission_rows(rows) -> list[dict]:
+    cleaned: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(rows, list):
+        return cleaned
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        email = str(row.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            continue
+        if email in seen:
+            continue
+        out = {"email": email}
+        for scope in PERMISSION_SCOPE_KEYS:
+            out[scope] = _normalize_permission_level(row.get(scope), "none")
+        cleaned.append(out)
+        seen.add(email)
+    cleaned.sort(key=lambda x: x["email"])
+    return cleaned
+
+
+def _empty_permissions_config() -> dict:
+    return {
+        "version": 1,
+        "defaults": _permission_default_levels(),
+        "rows": [],
+        "updated_at": "",
+        "updated_by": "",
+    }
+
+
+def _sanitize_permissions_config(cfg: dict | None) -> dict:
+    base = _empty_permissions_config()
+    if not isinstance(cfg, dict):
+        return base
+    defaults = {}
+    raw_defaults = cfg.get("defaults")
+    if isinstance(raw_defaults, dict):
+        for scope in PERMISSION_SCOPE_KEYS:
+            defaults[scope] = _normalize_permission_level(raw_defaults.get(scope), _permission_default_levels()[scope])
+    else:
+        defaults = _permission_default_levels()
+    base["defaults"] = defaults
+    base["rows"] = _clean_permission_rows(cfg.get("rows"))
+    base["updated_at"] = str(cfg.get("updated_at") or "")
+    base["updated_by"] = str(cfg.get("updated_by") or "")
+    return base
+
+
+def _read_permissions_config_dict() -> dict:
+    # GCS 우선(다중 인스턴스 실시간성), 실패 시 로컬 fallback.
+    if gcs_enabled():
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tf:
+            tfp = Path(tf.name)
+        try:
+            if _gcs_download_file(_permissions_blob_name(), tfp):
+                raw = json.loads(tfp.read_text(encoding="utf-8"))
+                cfg = _sanitize_permissions_config(raw)
+                PERMISSIONS_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+                PERMISSIONS_LOCAL_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+                return cfg
+        except (json.JSONDecodeError, OSError):
+            pass
+        finally:
+            tfp.unlink(missing_ok=True)
+    if PERMISSIONS_LOCAL_PATH.is_file():
+        try:
+            return _sanitize_permissions_config(json.loads(PERMISSIONS_LOCAL_PATH.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return _empty_permissions_config()
+
+
+def _load_permissions_config(force: bool = False) -> dict:
+    global _PERMISSIONS_CACHE, _PERMISSIONS_CACHE_AT
+    now = time.time()
+    if not force and _PERMISSIONS_CACHE is not None and (now - _PERMISSIONS_CACHE_AT) <= _PERMISSIONS_CACHE_TTL_SEC:
+        return _PERMISSIONS_CACHE
+    cfg = _read_permissions_config_dict()
+    _PERMISSIONS_CACHE = cfg
+    _PERMISSIONS_CACHE_AT = now
+    return cfg
+
+
+def _save_permissions_config(rows: list[dict], updated_by: str = "") -> tuple[bool, str | None]:
+    cfg = _empty_permissions_config()
+    cfg["rows"] = _clean_permission_rows(rows)
+    cfg["updated_at"] = datetime.now(KST).isoformat()
+    cfg["updated_by"] = str(updated_by or "").strip().lower()
+    try:
+        PERMISSIONS_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+        PERMISSIONS_LOCAL_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        if gcs_enabled():
+            _gcs_upload_text(
+                json.dumps(cfg, ensure_ascii=False, indent=2),
+                _permissions_blob_name(),
+            )
+        elif _is_railway_deploy() and not _publish_allow_local_only():
+            return False, (
+                "Railway에서는 재배포 후에도 유지되도록 GCS 저장이 필요합니다. "
+                "GCP_PROJECT_ID, GCS_BUCKET, GOOGLE_APPLICATION_CREDENTIALS_JSON을 설정해 주세요."
+            )
+        elif _gcs_env_configured() and not gcs_enabled():
+            return False, "GCS 설정은 있으나 라이브러리를 불러오지 못했습니다. 환경을 확인해 주세요."
+    except Exception as e:
+        return False, f"권한 저장 실패: {e}"
+    _load_permissions_config(force=True)
+    return True, None
+
+
+def _scope_levels_for_email(email: str) -> dict[str, str]:
+    # super-admin(ADMIN_EMAILS)은 항상 전체 edit
+    e = str(email or "").strip().lower()
+    if e and e in _admin_email_set():
+        return {scope: "edit" for scope in PERMISSION_SCOPE_KEYS}
+    cfg = _load_permissions_config()
+    defaults = cfg.get("defaults") if isinstance(cfg.get("defaults"), dict) else {}
+    levels = {
+        scope: _normalize_permission_level(
+            defaults.get(scope),
+            _permission_default_levels()[scope],
+        )
+        for scope in PERMISSION_SCOPE_KEYS
+    }
+    if not e:
+        return levels
+    for row in cfg.get("rows", []):
+        if str(row.get("email") or "").strip().lower() != e:
+            continue
+        for scope in PERMISSION_SCOPE_KEYS:
+            levels[scope] = _normalize_permission_level(row.get(scope), levels[scope])
+        break
+    return levels
+
+
+def _current_user_scope_level(scope: str) -> str:
+    if auth_disabled():
+        return "edit"
+    if scope not in PERMISSION_SCOPE_KEYS:
+        return "none"
+    email = (session.get("user_email") or "").strip().lower()
+    return _scope_levels_for_email(email).get(scope, "none")
+
+
+def _can_current_user(scope: str, required: str = "view") -> bool:
+    need = _normalize_permission_level(required, "view")
+    have = _current_user_scope_level(scope)
+    return PERMISSION_LEVEL_RANK.get(have, 0) >= PERMISSION_LEVEL_RANK.get(need, 1)
+
+
+def require_permission(scope: str, required: str = "view"):
+    def _decorator(fn):
+        @wraps(fn)
+        def _wrapped(*args, **kwargs):
+            if _can_current_user(scope, required):
+                return fn(*args, **kwargs)
+            flash("해당 화면 접근 권한이 없습니다.", "error")
+            return redirect(url_for("index"))
+
+        return _wrapped
+
+    return _decorator
+
+
 def _admin_upload_display_context() -> dict:
     """관리자 업로드 화면: 마지막 파일명·시간 표시용."""
     meta = _read_published_meta_dict()
@@ -754,10 +957,24 @@ def _admin_upload_display_context() -> dict:
             "filename": str(fm["filename"]),
             "when": _format_iso_kst_display(fm.get("uploaded_at")),
         }
+    perm_cfg = _load_permissions_config()
+    permission_rows = perm_cfg.get("rows", []) if isinstance(perm_cfg, dict) else []
+    permission_scopes = [
+        {"key": "payroll", "label": "급여 데이터"},
+        {"key": "dashboard", "label": "인건비 대시보드"},
+        {"key": "overtime", "label": "연장근무 현황"},
+        {"key": "commercialization", "label": "상품화 인건비"},
+        {"key": "admin_data", "label": "관리자 데이터"},
+    ]
     return {
         "upload_last_attendance": att,
         "upload_last_leave": leave,
         "upload_last_fm": fm_disp,
+        "permission_rows": permission_rows,
+        "permission_scopes": permission_scopes,
+        "permission_levels": list(PERMISSION_LEVELS),
+        "permission_updated_at": _format_iso_kst_display(perm_cfg.get("updated_at")) if isinstance(perm_cfg, dict) else "—",
+        "permission_updated_by": str((perm_cfg or {}).get("updated_by") or "—"),
     }
 
 
@@ -1322,9 +1539,12 @@ def _build_dashboard_context(output_dir: Path):
 
 @app.route("/overtime-status")
 def overtime_status():
+    if not _can_current_user("overtime", "view"):
+        flash("연장근무 현황 조회 권한이 없습니다.", "error")
+        return redirect(url_for("index"))
     default_month = datetime.now(KST).strftime("%Y-%m")
     work_month = _normalize_work_month(request.args.get("work_month"), default_month)
-    can_save = is_current_user_admin()
+    can_save = _can_current_user("overtime", "edit")
     fm_meta = _read_fm_upload_meta_dict() or {}
     ov_meta = _read_overtime_status_meta_dict() or {}
     token = f"{work_month}|{fm_meta.get('uploaded_at','')}|{ov_meta.get('saved_at','')}|{int(can_save)}"
@@ -1887,9 +2107,10 @@ def _make_payroll_result_response(
             flash(f"결과 테이블 생성 중 오류: {e}", "error")
             return _err_template()
 
-        can_edit = is_current_user_admin() and ((not read_only) or allow_published_edit)
+        can_payroll_edit = _can_current_user("payroll", "edit")
+        can_edit = can_payroll_edit and ((not read_only) or allow_published_edit)
         save_published_url = (
-            url_for("save_published_payroll") if allow_published_edit and is_current_user_admin() else None
+            url_for("save_published_payroll") if allow_published_edit and can_payroll_edit else None
         )
         html = render_template(
             "result.html",
@@ -1913,7 +2134,7 @@ def _make_payroll_result_response(
             result_read_only=read_only,
             result_back_href=back_href,
             result_back_label=back_label,
-            export_allowed=is_current_user_admin(),
+            export_allowed=can_payroll_edit,
             table_editable=can_edit,
         )
         resp = make_response(html)
@@ -1928,6 +2149,13 @@ def _make_payroll_result_response(
 def inject_nav():
     return {
         "is_admin_user": is_current_user_admin(),
+        "can_view_payroll": _can_current_user("payroll", "view"),
+        "can_view_dashboard": _can_current_user("dashboard", "view"),
+        "can_view_commercialization": _can_current_user("commercialization", "view"),
+        "can_view_overtime": _can_current_user("overtime", "view"),
+        "can_view_admin_data": _can_current_user("admin_data", "view"),
+        "can_edit_admin_data": _can_current_user("admin_data", "edit"),
+        "can_manage_permissions": is_current_user_admin(),
         "app_version": app_version_display(),
         "fm_roster_on_disk": FM_ROSTER_LOCAL_PATH.is_file(),
     }
@@ -1937,12 +2165,25 @@ def inject_nav():
 def index():
     if not _published_exists():
         return render_template("public_home.html")
-    return redirect(url_for("payroll"))
+    if _can_current_user("payroll", "view"):
+        return redirect(url_for("payroll"))
+    if _can_current_user("dashboard", "view"):
+        return redirect(url_for("dashboard"))
+    if _can_current_user("overtime", "view"):
+        return redirect(url_for("overtime_status"))
+    if _can_current_user("commercialization", "view"):
+        return redirect(url_for("commercialization_dashboard"))
+    if _can_current_user("admin_data", "view"):
+        return redirect(url_for("admin_data"))
+    return render_template("public_home.html")
 
 
 @app.route("/payroll", methods=["GET"])
 def payroll():
     """공개 payroll_result 테이블(모든 로그인 사용자)."""
+    if not _can_current_user("payroll", "view"):
+        flash("급여 데이터 조회 권한이 없습니다.", "error")
+        return redirect(url_for("index"))
     if not _published_exists():
         return redirect(url_for("index"))
     with tempfile.TemporaryDirectory() as tmp:
@@ -1955,8 +2196,8 @@ def payroll():
 @app.route("/payroll/save", methods=["POST"])
 def save_published_payroll():
     """관리자가 급여 테이블을 수정한 뒤 공개본(published)으로 저장 — GCS·로컬 output/published 갱신."""
-    if not is_current_user_admin():
-        return jsonify({"ok": False, "error": "관리자만 저장할 수 있습니다."}), 403
+    if not _can_current_user("payroll", "edit"):
+        return jsonify({"ok": False, "error": "급여 데이터 저장 권한이 없습니다."}), 403
     data = request.get_json(silent=True) or {}
     rows = data.get("rows")
     if not rows:
@@ -2040,8 +2281,8 @@ def save_overtime_status():
     """관리자 전용: 연장근무 현황 테이블 최신본 저장(로컬 metadata + GCS metadata)."""
     import pandas as pd
 
-    if not is_current_user_admin():
-        return jsonify({"ok": False, "error": "관리자만 저장할 수 있습니다."}), 403
+    if not _can_current_user("overtime", "edit"):
+        return jsonify({"ok": False, "error": "연장근무 현황 저장 권한이 없습니다."}), 403
 
     data = request.get_json(silent=True) or {}
     rows_in = data.get("rows")
@@ -2206,11 +2447,38 @@ def save_overtime_status():
         return jsonify({"ok": True, "message": msg, "gcs_synced": gcs_ok})
 
 
+@app.route("/admin/permissions", methods=["POST"])
+def admin_permissions():
+    # 권한 편집 권한은 super-admin(ADMIN_EMAILS)만 허용: 임의 권한 승격 방지
+    if not is_current_user_admin():
+        flash("권한 관리는 최고 관리자만 변경할 수 있습니다.", "error")
+        return redirect(url_for("admin_data"))
+    payload_raw = (request.form.get("permissions_payload") or "").strip()
+    if not payload_raw:
+        flash("저장할 권한 데이터가 없습니다.", "error")
+        return redirect(url_for("admin_data"))
+    try:
+        parsed = json.loads(payload_raw)
+    except json.JSONDecodeError:
+        flash("권한 데이터 형식이 올바르지 않습니다.", "error")
+        return redirect(url_for("admin_data"))
+    if not isinstance(parsed, list):
+        flash("권한 데이터 형식이 올바르지 않습니다.", "error")
+        return redirect(url_for("admin_data"))
+    rows = _clean_permission_rows(parsed)
+    ok, err = _save_permissions_config(rows, updated_by=(session.get("user_email") or ""))
+    if not ok:
+        flash(err or "권한 저장 실패", "error")
+        return redirect(url_for("admin_data"))
+    flash(f"권한 설정이 저장되었습니다. ({len(rows)}개 계정)", "success")
+    return redirect(url_for("admin_data"))
+
+
 @app.route("/admin/fm-roster", methods=["POST"])
 def admin_fm_roster():
     """FM 기본정보 xlsx — 로컬 output/metadata + GCS metadata/fm_roster.xlsx."""
-    if not is_current_user_admin():
-        flash("관리자만 접근할 수 있습니다.", "error")
+    if not _can_current_user("admin_data", "edit"):
+        flash("관리자 데이터 수정 권한이 없습니다.", "error")
         return redirect(url_for("index"))
     f = request.files.get("file_fm")
     if not f or not f.filename or not str(f.filename).strip():
@@ -2277,10 +2545,13 @@ def admin_fm_roster():
 @app.route("/admin/data", methods=["GET", "POST"])
 @app.route("/admin", methods=["GET", "POST"])
 def admin_data():
-    if not is_current_user_admin():
-        flash("관리자만 접근할 수 있습니다.", "error")
+    if not _can_current_user("admin_data", "view"):
+        flash("관리자 데이터 조회 권한이 없습니다.", "error")
         return redirect(url_for("index"))
     if request.method == "GET":
+        return render_template("upload.html", **_admin_upload_display_context())
+    if not _can_current_user("admin_data", "edit"):
+        flash("관리자 데이터 수정 권한이 없습니다.", "error")
         return render_template("upload.html", **_admin_upload_display_context())
 
     file = request.files.get("file")
@@ -2374,8 +2645,8 @@ def export_google_sheet():
     if request.method == "GET":
         return jsonify({"ok": True, "message": "POST로 요청하세요."})
 
-    if not is_current_user_admin():
-        return jsonify({"ok": False, "error": "관리자만 구글 시트로 내보낼 수 있습니다."}), 403
+    if not _can_current_user("payroll", "edit"):
+        return jsonify({"ok": False, "error": "구글 시트 내보내기 권한이 없습니다."}), 403
 
     resolved = resolve_export_output_dir()
     if not resolved:

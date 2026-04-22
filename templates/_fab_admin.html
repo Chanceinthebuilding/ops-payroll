@@ -1,4 +1,4 @@
-{% if is_admin_user and request.endpoint != 'admin_data' %}
+{% if can_view_admin_data and request.endpoint != 'admin_data' %}
 <a href="{{ url_for('admin_data') }}" title="관리자 데이터 — 엑셀 업로드" class="admin-data-fab" aria-label="관리자 데이터 업로드">
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
