@@ -329,9 +329,10 @@ def _apply_unit_color_scale(rows: list[dict]) -> None:
     def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
         return "#{:02x}{:02x}{:02x}".format(*rgb)
 
-    red = (248, 113, 113)
-    white = (255, 255, 255)
+    # 단가형 지표: 낮을수록 좋으므로 Green(낮음) → White(중간) → Red(높음)
     green = (74, 222, 128)
+    white = (255, 255, 255)
+    red = (248, 113, 113)
 
     for r in rows:
         v = r.get("unit")
@@ -343,17 +344,17 @@ def _apply_unit_color_scale(rows: list[dict]) -> None:
             denom = max(1e-9, (mid - lo))
             t = (fv - lo) / denom
             rgb = (
-                _lerp(red[0], white[0], t),
-                _lerp(red[1], white[1], t),
-                _lerp(red[2], white[2], t),
+                _lerp(green[0], white[0], t),
+                _lerp(green[1], white[1], t),
+                _lerp(green[2], white[2], t),
             )
         else:
             denom = max(1e-9, (hi - mid))
             t = (fv - mid) / denom
             rgb = (
-                _lerp(white[0], green[0], t),
-                _lerp(white[1], green[1], t),
-                _lerp(white[2], green[2], t),
+                _lerp(white[0], red[0], t),
+                _lerp(white[1], red[1], t),
+                _lerp(white[2], red[2], t),
             )
         r["unit_bg"] = _rgb_to_hex(rgb)
 
