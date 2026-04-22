@@ -42,6 +42,7 @@ FM_ROSTER_LOCAL_DIR = OUTPUT_BASE / "metadata"
 FM_ROSTER_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / FM_ROSTER_FILENAME
 FM_UPLOAD_META_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / "fm_upload_meta.json"
 COMMERCIALIZATION_REMARKS_PATH = FM_ROSTER_LOCAL_DIR / "commercialization_remarks.json"
+LAST_LEAVE_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / "last_leave.xlsx"
 OVERTIME_STATUS_FILENAME = "overtime_status.csv"
 OVERTIME_STATUS_META_FILENAME = "overtime_status_meta.json"
 OVERTIME_STATUS_LOCAL_PATH = FM_ROSTER_LOCAL_DIR / OVERTIME_STATUS_FILENAME
@@ -1279,17 +1280,21 @@ def _sync_run_to_gcs(run_dir: Path, input_path: Path, leave_path: Path | None = 
     if leave_path and leave_path.exists():
         meta["last_leave_name"] = leave_path.name
         meta["last_leave_at"] = now_iso
+        meta["last_leave_blob"] = f"metadata/{LAST_LEAVE_LOCAL_PATH.name}"
     elif prev:
         meta["last_leave_name"] = prev.get("last_leave_name") or ""
         meta["last_leave_at"] = prev.get("last_leave_at") or ""
+        meta["last_leave_blob"] = prev.get("last_leave_blob") or ""
     else:
         meta["last_leave_name"] = ""
         meta["last_leave_at"] = ""
+        meta["last_leave_blob"] = ""
 
     if gcs_enabled():
         _gcs_upload_file(input_path, f"uploads/attendance/{stamp}{input_path.suffix}")
         if leave_path and leave_path.exists():
             _gcs_upload_file(leave_path, f"uploads/leave/{stamp}{leave_path.suffix}")
+            _gcs_upload_file(leave_path, f"metadata/{LAST_LEAVE_LOCAL_PATH.name}")
         for name in PUBLISHED_FILES:
             src = run_dir / name
             if not src.exists():
@@ -1300,7 +1305,57 @@ def _sync_run_to_gcs(run_dir: Path, input_path: Path, leave_path: Path | None = 
             json.dumps(meta, ensure_ascii=False, indent=2),
             _published_blob_name(PUBLISHED_META_FILENAME),
         )
+    if leave_path and leave_path.exists():
+        FM_ROSTER_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(leave_path, LAST_LEAVE_LOCAL_PATH)
     _write_published_meta_local(meta)
+
+
+def _resolve_leave_path_for_upload(tmp_dir: Path, file_leave_obj) -> tuple[Path | None, str]:
+    """
+    관리자 업로드 시 사용할 휴가 파일 경로를 결정.
+    우선순위: 이번 요청 업로드 > 로컬 보관본 > GCS 보관본/이전 업로드.
+    반환: (leave_path_or_none, source_label)
+    """
+    if file_leave_obj and file_leave_obj.filename and file_leave_obj.filename.strip():
+        if file_leave_obj.filename.lower().endswith((".xlsx", ".xls")):
+            leave_path = tmp_dir / "leave.xlsx"
+            file_leave_obj.save(str(leave_path))
+            return leave_path, "uploaded"
+        return None, "invalid"
+
+    if LAST_LEAVE_LOCAL_PATH.is_file():
+        leave_path = tmp_dir / "leave.xlsx"
+        shutil.copy2(LAST_LEAVE_LOCAL_PATH, leave_path)
+        return leave_path, "local_cached"
+
+    meta = _read_published_meta_dict() or {}
+    if not gcs_enabled():
+        return None, "none"
+
+    leave_path = tmp_dir / "leave.xlsx"
+    # 1) 최신 고정 보관본(신규 정책)
+    blob = (meta.get("last_leave_blob") or "").strip() or f"metadata/{LAST_LEAVE_LOCAL_PATH.name}"
+    if _gcs_download_file(blob, leave_path):
+        return leave_path, "gcs_cached"
+
+    # 2) 이전 정책 업로드 경로 추정 (uploads/leave/{stamp}.{ext})
+    last_at = (meta.get("last_leave_at") or "").strip()
+    last_name = (meta.get("last_leave_name") or meta.get("leave_name") or "").strip()
+    suffix = Path(last_name).suffix if last_name else ".xlsx"
+    if suffix.lower() not in (".xlsx", ".xls"):
+        suffix = ".xlsx"
+    if last_at:
+        try:
+            dt = datetime.fromisoformat(last_at)
+            stamp = dt.astimezone(KST).strftime("%Y-%m-%d_%H%M%S")
+            old_blob = f"uploads/leave/{stamp}{suffix}"
+            if _gcs_download_file(old_blob, leave_path):
+                return leave_path, "gcs_legacy"
+        except ValueError:
+            pass
+
+    return None, "none"
 
 
 def _to_num(val, default=0.0):
@@ -2881,12 +2936,11 @@ def admin_data():
                 shutil.rmtree(run_dir)
             run_dir.mkdir(parents=True, exist_ok=True)
 
-            leave_path = None
             file_leave = request.files.get("file_leave")
-            if file_leave and file_leave.filename and file_leave.filename.strip():
-                if file_leave.filename.lower().endswith((".xlsx", ".xls")):
-                    leave_path = tmp / "leave.xlsx"
-                    file_leave.save(str(leave_path))
+            leave_path, leave_source = _resolve_leave_path_for_upload(tmp, file_leave)
+            if leave_source == "invalid":
+                flash("휴가 파일은 엑셀(.xlsx, .xls)만 업로드 가능합니다.", "error")
+                return render_template("upload.html", **_admin_upload_display_context())
 
             try:
                 from run_all import run_pipeline
@@ -2916,7 +2970,10 @@ def admin_data():
                     "warning",
                 )
             session["last_run_id"] = PUBLISHED_ID
-            flash("공개 급여 데이터가 갱신되었습니다.", "success")
+            if leave_source in ("local_cached", "gcs_cached", "gcs_legacy"):
+                flash("휴가 파일을 새로 첨부하지 않아, 마지막 휴가 데이터를 자동 반영해 갱신했습니다.", "success")
+            else:
+                flash("공개 급여 데이터가 갱신되었습니다.", "success")
             return redirect(url_for("payroll"))
     except Exception as e:
         flash(f"처리 중 오류: {e}", "error")
