@@ -49,14 +49,14 @@
       color: #475569;
       line-height: 1.65;
     }
-    .dual {
+    .triple {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 16px;
       align-items: start;
     }
     @media (max-width: 1100px) {
-      .dual { grid-template-columns: 1fr; }
+      .triple { grid-template-columns: 1fr; }
     }
     .panel {
       background: rgba(255, 255, 255, 0.82);
@@ -66,6 +66,28 @@
       box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
       overflow-x: auto;
     }
+    .chart-card {
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      border-radius: 16px;
+      padding: 14px 12px 16px;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+      margin-bottom: 16px;
+    }
+    .chart-legend {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 0 0 10px;
+      font-size: 0.78rem;
+      color: #334155;
+      font-weight: 600;
+    }
+    .chart-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; margin-right: 6px; }
+    .chart-wrap { overflow-x: auto; }
+    .chart-svg { min-width: 980px; width: 100%; height: auto; }
+    .y-label, .x-label { fill: #64748b; font-size: 11px; }
     .panel h2 {
       margin: 0 0 10px;
       font-size: 0.95rem;
@@ -124,7 +146,43 @@
     <div class="err">{{ commercialization_error }}</div>
     {% endif %}
 
-    <div class="dual">
+    <section class="chart-card">
+      <h2 style="margin: 0 0 8px; font-size: 0.95rem;">월별 인건비 추이 (단위: 원)</h2>
+      <p class="cap" style="margin-bottom: 8px;">X축: 연월 · Y축: 금액 (0 ~ 8,000)</p>
+      <div class="chart-legend">
+        <span><i class="chart-dot" style="background:#2563eb;"></i>상품화 FM</span>
+        <span><i class="chart-dot" style="background:#16a34a;"></i>상품화+물류 FM</span>
+        <span><i class="chart-dot" style="background:#7c3aed;"></i>주문 FM</span>
+      </div>
+      <div class="chart-wrap">
+        <svg class="chart-svg" viewBox="0 0 {{ chart_ctx.width }} {{ chart_ctx.height }}" role="img" aria-label="월별 인건비 꺾은선 그래프">
+          {% for t in chart_ctx.y_ticks %}
+          <line x1="{{ chart_ctx.plot_left }}" y1="{{ t.y }}" x2="{{ chart_ctx.plot_right }}" y2="{{ t.y }}" stroke="#e2e8f0" stroke-width="1"></line>
+          <text class="y-label" x="{{ chart_ctx.plot_left - 8 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ "{:,}".format(t.value) }}</text>
+          {% endfor %}
+
+          <line x1="{{ chart_ctx.plot_left }}" y1="{{ chart_ctx.plot_top }}" x2="{{ chart_ctx.plot_left }}" y2="{{ chart_ctx.plot_bottom }}" stroke="#94a3b8" stroke-width="1"></line>
+          <line x1="{{ chart_ctx.plot_left }}" y1="{{ chart_ctx.plot_bottom }}" x2="{{ chart_ctx.plot_right }}" y2="{{ chart_ctx.plot_bottom }}" stroke="#94a3b8" stroke-width="1"></line>
+
+          {% for s in chart_ctx.series %}
+            {% if s.points %}
+            <polyline points="{{ s.points }}" fill="none" stroke="{{ s.color }}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+            {% endif %}
+            {% for d in s.dots %}
+            <circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.8" fill="{{ s.color }}">
+              <title>{{ s.key }} {{ d.label }}: {{ "{:,}".format(d.value) }}원</title>
+            </circle>
+            {% endfor %}
+          {% endfor %}
+
+          {% for xt in chart_ctx.x_ticks %}
+          <text class="x-label" x="{{ xt.x }}" y="{{ chart_ctx.plot_bottom + 18 }}" text-anchor="middle">{{ xt.label }}</text>
+          {% endfor %}
+        </svg>
+      </div>
+    </section>
+
+    <div class="triple">
       <section class="panel">
         <h2>상품화 FM 인건비</h2>
         <p class="cap">(태깅 + 클리닝 + 촬영) 인건비 ÷ 상품화 개수</p>
@@ -190,39 +248,39 @@
           </tbody>
         </table>
       </section>
-    </div>
 
-    <section class="panel" style="margin-top:16px;">
-      <h2>주문 FM 인건비</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>연월</th>
-            <th class="num">주문상품 건수</th>
-            <th class="num">chg</th>
-            <th class="num">FM인건비(원)</th>
-            <th class="num">chg</th>
-            <th class="num">주문상품당 인건비(원)</th>
-            <th class="num">chg</th>
-            <th>비고</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows_order_fm %}
-          <tr>
-            <td>{{ r.ym }}</td>
-            <td class="num">{{ "{:,}".format(r.cnt) }}</td>
-            <td class="num">{{ fmt_pct(r.chg_cnt) }}</td>
-            <td class="num">{{ "{:,}".format(r.cost) }}</td>
-            <td class="num">{{ fmt_pct(r.chg_cost) }}</td>
-            <td class="num hl">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
-            <td class="num">{{ fmt_pct(r.chg_unit) }}</td>
-            <td class="remark">{{ r.remark }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </section>
+      <section class="panel">
+        <h2>주문 FM 인건비</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>연월</th>
+              <th class="num">주문상품 건수</th>
+              <th class="num">chg</th>
+              <th class="num">FM인건비(원)</th>
+              <th class="num">chg</th>
+              <th class="num">주문상품당 인건비(원)</th>
+              <th class="num">chg</th>
+              <th>비고</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows_order_fm %}
+            <tr>
+              <td>{{ r.ym }}</td>
+              <td class="num">{{ "{:,}".format(r.cnt) }}</td>
+              <td class="num">{{ fmt_pct(r.chg_cnt) }}</td>
+              <td class="num">{{ "{:,}".format(r.cost) }}</td>
+              <td class="num">{{ fmt_pct(r.chg_cost) }}</td>
+              <td class="num hl">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
+              <td class="num">{{ fmt_pct(r.chg_unit) }}</td>
+              <td class="remark">{{ r.remark }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </div>
 
     <p class="sub" style="margin-top:18px;">
       데이터 소스: 구글 시트 <code>상품화 데이터</code> 탭

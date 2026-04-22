@@ -201,15 +201,23 @@ def commercialization_dashboard():
             fmt_pct=fmt_pct,
         )
 
+    rows_fm = list(data.get("rows_fm", []))
+    rows_log = list(data.get("rows_logistics", []))
+    rows_order = list(data.get("rows_order_fm", []))
+    role_totals = _commercialization_role_totals_from_dashboard_cache()
+    _apply_commercialization_role_override(rows_fm, rows_log, rows_order, role_totals, target_ym="2026-04")
+    chart_ctx = _build_commercialization_unit_line_chart(rows_fm, rows_log, rows_order, y_min=0, y_max=8000)
+
     return render_template(
         "commercialization.html",
         commercialization_ready=True,
         commercialization_error=err,
         range_start=start,
         range_end=end,
-        rows_fm=data.get("rows_fm", []),
-        rows_logistics=data.get("rows_logistics", []),
-        rows_order_fm=data.get("rows_order_fm", []),
+        rows_fm=rows_fm,
+        rows_logistics=rows_log,
+        rows_order_fm=rows_order,
+        chart_ctx=chart_ctx,
         fmt_pct=fmt_pct,
     )
 
@@ -221,6 +229,209 @@ def healthz():
 
 def _gcs_bucket_name() -> str:
     return os.environ.get("GCS_BUCKET", "").strip()
+
+
+def _commercialization_role_totals_from_dashboard_cache() -> dict[str, int]:
+    rows: list[dict] = []
+
+    payload = _read_dashboard_cache_dict() or {}
+    ctx = payload.get("ctx") if isinstance(payload, dict) else {}
+    cached_rows = ctx.get("fm_role_rows") if isinstance(ctx, dict) else []
+    if isinstance(cached_rows, list) and cached_rows:
+        rows = cached_rows
+
+    # 캐시가 비어 있으면 published 데이터를 읽어 즉시 집계(최신 업로드 직후 대비).
+    if not rows and _published_exists():
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_dir = Path(tmp)
+                if _download_published_to_dir(tmp_dir):
+                    _attach_fm_roster_to_dir(tmp_dir)
+                    live_ctx = _build_dashboard_context(tmp_dir)
+                    live_rows = live_ctx.get("fm_role_rows") if isinstance(live_ctx, dict) else []
+                    if isinstance(live_rows, list):
+                        rows = live_rows
+        except Exception:
+            rows = []
+
+    if not isinstance(rows, list):
+        rows = []
+
+    def _norm(s: str) -> str:
+        return str(s or "").strip().replace(" ", "")
+
+    tagging = 0
+    cleaning = 0
+    shooting = 0
+    logistics = 0
+    for r in rows:
+        role = _norm(r.get("role"))
+        try:
+            pay = int(round(float(r.get("total_pay", 0) or 0)))
+        except (TypeError, ValueError):
+            pay = 0
+        if "태깅" in role:
+            tagging += pay
+        if "클리닝" in role:
+            cleaning += pay
+        if "촬영" in role:
+            shooting += pay
+        if "물류" in role:
+            logistics += pay
+
+    return {
+        "tagging_krw": tagging,
+        "cleaning_krw": cleaning,
+        "shooting_krw": shooting,
+        "logistics_krw": logistics,
+    }
+
+
+def _recalculate_cost_change_fields(rows: list[dict]) -> None:
+    prev_cost: int | None = None
+    prev_unit: int | None = None
+    for r in rows:
+        cost = int(r.get("cost") or 0)
+        unit = r.get("unit")
+        unit_val = int(unit) if unit is not None else None
+
+        if prev_cost is None or prev_cost == 0:
+            r["chg_cost"] = None
+        else:
+            r["chg_cost"] = round((cost - prev_cost) / prev_cost * 100.0, 1)
+
+        if prev_unit is None or prev_unit == 0 or unit_val is None:
+            r["chg_unit"] = None
+        else:
+            r["chg_unit"] = round((unit_val - prev_unit) / prev_unit * 100.0, 1)
+
+        prev_cost = cost
+        prev_unit = unit_val
+
+
+def _apply_commercialization_role_override(
+    rows_fm: list[dict],
+    rows_logistics: list[dict],
+    rows_order_fm: list[dict],
+    role_totals: dict[str, int],
+    *,
+    target_ym: str,
+) -> None:
+    base_fm = int(role_totals.get("tagging_krw", 0)) + int(role_totals.get("cleaning_krw", 0)) + int(
+        role_totals.get("shooting_krw", 0)
+    )
+    logistics = int(role_totals.get("logistics_krw", 0))
+    if base_fm <= 0 and logistics <= 0:
+        return
+
+    def _ensure_row(rows: list[dict]) -> dict:
+        for rr in rows:
+            if str(rr.get("ym")) == target_ym:
+                return rr
+        new_row = {
+            "ym": target_ym,
+            "cnt": 0,
+            "chg_cnt": None,
+            "cost": 0,
+            "chg_cost": None,
+            "unit": None,
+            "chg_unit": None,
+            "remark": "",
+        }
+        rows.append(new_row)
+        rows.sort(key=lambda x: str(x.get("ym") or ""))
+        return new_row
+
+    row_fm = _ensure_row(rows_fm)
+    row_fm["cost"] = base_fm
+    cnt = int(row_fm.get("cnt") or 0)
+    row_fm["unit"] = int(round(base_fm / cnt)) if cnt > 0 else None
+    row_fm["remark"] = (str(row_fm.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
+
+    row_log = _ensure_row(rows_logistics)
+    total = base_fm + logistics
+    row_log["cost"] = total
+    cnt = int(row_log.get("cnt") or 0)
+    row_log["unit"] = int(round(total / cnt)) if cnt > 0 else None
+    row_log["remark"] = (str(row_log.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
+
+    row_order = _ensure_row(rows_order_fm)
+    row_order["cost"] = logistics
+    cnt = int(row_order.get("cnt") or 0)
+    row_order["unit"] = int(round(logistics / cnt)) if cnt > 0 else None
+    row_order["remark"] = (str(row_order.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
+
+    _recalculate_cost_change_fields(rows_fm)
+    _recalculate_cost_change_fields(rows_logistics)
+    _recalculate_cost_change_fields(rows_order_fm)
+
+
+def _build_commercialization_unit_line_chart(
+    rows_fm: list[dict],
+    rows_logistics: list[dict],
+    rows_order_fm: list[dict],
+    *,
+    y_min: int,
+    y_max: int,
+) -> dict:
+    labels = sorted({str(r.get("ym")) for r in (rows_fm + rows_logistics + rows_order_fm) if r.get("ym")})
+    width = 1080
+    height = 300
+    pad_l, pad_r, pad_t, pad_b = 60, 24, 20, 44
+    plot_w = max(1, width - pad_l - pad_r)
+    plot_h = max(1, height - pad_t - pad_b)
+
+    def _x(i: int, n: int) -> float:
+        if n <= 1:
+            return float(pad_l + plot_w / 2)
+        return float(pad_l + (plot_w * i / (n - 1)))
+
+    def _y(v: int | None) -> float | None:
+        if v is None:
+            return None
+        vv = max(y_min, min(y_max, int(v)))
+        ratio = (vv - y_min) / max(1, (y_max - y_min))
+        return float(pad_t + (1.0 - ratio) * plot_h)
+
+    def _series(rows: list[dict], key: str, color: str) -> dict:
+        by = {str(r.get("ym")): r for r in rows}
+        points_xy: list[str] = []
+        dots: list[dict] = []
+        for i, ym in enumerate(labels):
+            rv = by.get(ym) or {}
+            v = rv.get("unit")
+            xv = _x(i, len(labels))
+            yv = _y(int(v) if v is not None else None)
+            if yv is None:
+                continue
+            points_xy.append(f"{xv:.2f},{yv:.2f}")
+            dots.append({"x": round(xv, 2), "y": round(yv, 2), "label": ym, "value": int(v)})
+        return {"key": key, "color": color, "points": " ".join(points_xy), "dots": dots}
+
+    ticks = []
+    for v in [0, 2000, 4000, 6000, 8000]:
+        yv = _y(v)
+        if yv is None:
+            continue
+        ticks.append({"value": v, "y": round(yv, 2)})
+
+    x_ticks = [{"label": ym, "x": round(_x(i, len(labels)), 2)} for i, ym in enumerate(labels)]
+
+    return {
+        "width": width,
+        "height": height,
+        "plot_left": pad_l,
+        "plot_right": width - pad_r,
+        "plot_top": pad_t,
+        "plot_bottom": height - pad_b,
+        "y_ticks": ticks,
+        "x_ticks": x_ticks,
+        "series": [
+            _series(rows_fm, "상품화 FM", "#2563eb"),
+            _series(rows_logistics, "상품화+물류 FM", "#16a34a"),
+            _series(rows_order_fm, "주문 FM", "#7c3aed"),
+        ],
+    }
 
 
 def _gcs_project_id() -> str:
