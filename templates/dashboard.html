@@ -90,6 +90,83 @@
     .fm-role-summary th,
     .fm-role-summary td,
     .fm-role-summary td.num { text-align: center; }
+    .fm-role-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .fm-role-pie-box {
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #fff;
+      padding: 12px 10px 10px;
+    }
+    .fm-role-pie-title {
+      margin: 0 0 8px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: #334155;
+      text-align: center;
+    }
+    .fm-role-pie-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      max-height: 310px;
+      margin: 0 auto;
+    }
+    .fm-role-pie-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .fm-role-pie-tip {
+      position: absolute;
+      display: none;
+      pointer-events: none;
+      z-index: 10;
+      min-width: 150px;
+      max-width: 210px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.9);
+      color: #f8fafc;
+      font-size: 0.74rem;
+      line-height: 1.45;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.24);
+    }
+    .fm-role-pie-legend {
+      display: grid;
+      gap: 5px;
+      margin-top: 8px;
+      font-size: 0.74rem;
+      color: #334155;
+    }
+    .fm-role-pie-legend-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .fm-role-pie-legend-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .fm-role-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      display: inline-block;
+      flex: 0 0 auto;
+    }
+    .fm-role-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .muted-card {
       background: rgba(255, 255, 255, 0.72);
       border: 1px dashed #cbd5e1;
@@ -103,6 +180,7 @@
     @media (max-width: 980px) {
       .grid-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .layout { grid-template-columns: 1fr; }
+      .fm-role-layout { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -146,20 +224,32 @@
           급여 테이블의 사번(또는 사번 없으면 이름)과 FM 목록을 매칭했습니다.
           (매칭됨 <strong>{{ fm_matched_in_payroll }}</strong> / 급여 행 <strong>{{ fm_payroll_rows }}</strong>)
         </p>
-        <table class="fm-role-summary">
-          <thead>
-            <tr><th>역할</th><th class="num">인원(고유 사번)</th><th class="num">합산 급여</th></tr>
-          </thead>
-          <tbody>
-            {% for r in fm_role_rows %}
-            <tr>
-              <td>{{ r.role }}</td>
-              <td class="num">{{ r.headcount }}</td>
-              <td class="num">{{ "{:,}".format(r.total_pay) }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+        <div class="fm-role-layout">
+          <div>
+            <table class="fm-role-summary">
+              <thead>
+                <tr><th>역할</th><th class="num">인원(고유 사번)</th><th class="num">합산 급여</th></tr>
+              </thead>
+              <tbody>
+                {% for r in fm_role_rows %}
+                <tr>
+                  <td>{{ r.role }}</td>
+                  <td class="num">{{ r.headcount }}</td>
+                  <td class="num">{{ "{:,}".format(r.total_pay) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <aside class="fm-role-pie-box">
+            <p class="fm-role-pie-title">역할별 합산 급여 비중</p>
+            <div class="fm-role-pie-wrap" id="fmRolePieWrap">
+              <svg id="fmRolePieSvg" class="fm-role-pie-svg" viewBox="0 0 320 320" role="img" aria-label="역할별 합산 급여 파이 차트"></svg>
+              <div id="fmRolePieTip" class="fm-role-pie-tip"></div>
+            </div>
+            <div id="fmRolePieLegend" class="fm-role-pie-legend"></div>
+          </aside>
+        </div>
       </article>
     </section>
     {% else %}
@@ -221,6 +311,91 @@
     </section>
     {% endif %}
   </div>
+  {% if dashboard_ready and fm_roster_ready and fm_role_rows %}
+  <script>
+    (function () {
+      const rows = {{ fm_role_rows | tojson }};
+      if (!Array.isArray(rows) || !rows.length) return;
+      const svg = document.getElementById("fmRolePieSvg");
+      const wrap = document.getElementById("fmRolePieWrap");
+      const tip = document.getElementById("fmRolePieTip");
+      const legend = document.getElementById("fmRolePieLegend");
+      if (!svg || !wrap || !tip || !legend) return;
+
+      const data = rows
+        .map((r) => ({
+          role: String(r.role || ""),
+          value: Number(r.total_pay || 0),
+        }))
+        .filter((r) => r.value > 0);
+      if (!data.length) return;
+
+      const total = data.reduce((acc, x) => acc + x.value, 0);
+      const colors = ["#2563eb", "#16a34a", "#7c3aed", "#f59e0b", "#ef4444", "#06b6d4", "#84cc16", "#ec4899", "#64748b"];
+      const cx = 160;
+      const cy = 160;
+      const r = 118;
+
+      const NS = "http://www.w3.org/2000/svg";
+      function polar(angle, radius) {
+        const x = cx + radius * Math.cos(angle - Math.PI / 2);
+        const y = cy + radius * Math.sin(angle - Math.PI / 2);
+        return { x, y };
+      }
+      function arcPath(start, end) {
+        const p1 = polar(start, r);
+        const p2 = polar(end, r);
+        const large = end - start > Math.PI ? 1 : 0;
+        return `M ${cx} ${cy} L ${p1.x} ${p1.y} A ${r} ${r} 0 ${large} 1 ${p2.x} ${p2.y} Z`;
+      }
+      function fmt(v) {
+        return `${Math.round(v).toLocaleString("ko-KR")}원`;
+      }
+
+      let cursor = 0;
+      data.forEach((item, i) => {
+        const ratio = item.value / total;
+        const sweep = ratio * Math.PI * 2;
+        const start = cursor;
+        const end = cursor + sweep;
+        cursor = end;
+
+        const path = document.createElementNS(NS, "path");
+        path.setAttribute("d", arcPath(start, end));
+        path.setAttribute("fill", colors[i % colors.length]);
+        path.setAttribute("stroke", "#ffffff");
+        path.setAttribute("stroke-width", "1.5");
+        path.style.transition = "opacity .15s ease";
+        svg.appendChild(path);
+
+        const pct = (ratio * 100).toFixed(1);
+        function moveTip(ev) {
+          const rect = wrap.getBoundingClientRect();
+          const x = ev.clientX - rect.left + 12;
+          const y = ev.clientY - rect.top + 12;
+          tip.style.left = `${Math.min(rect.width - 170, Math.max(8, x))}px`;
+          tip.style.top = `${Math.min(rect.height - 90, Math.max(8, y))}px`;
+        }
+        path.addEventListener("mouseenter", (ev) => {
+          tip.innerHTML = `<strong>${item.role}</strong><br>합산 급여: ${fmt(item.value)}<br>비중: ${pct}%`;
+          tip.style.display = "block";
+          path.style.opacity = "0.82";
+          moveTip(ev);
+        });
+        path.addEventListener("mousemove", moveTip);
+        path.addEventListener("mouseleave", () => {
+          tip.style.display = "none";
+          path.style.opacity = "1";
+        });
+
+        const row = document.createElement("div");
+        row.className = "fm-role-pie-legend-item";
+        row.innerHTML = `<span class="fm-role-pie-legend-left"><i class="fm-role-dot" style="background:${colors[i % colors.length]}"></i><span class="fm-role-label">${item.role}</span></span><span>${pct}%</span>`;
+        legend.appendChild(row);
+      });
+    })();
+  </script>
+  {% endif %}
   {% include '_fab_admin.html' %}
 </body>
 </html>
