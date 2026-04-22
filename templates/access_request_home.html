@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <title>접근 권한 안내 — NYJ Workforce Management</title>
+  <style>
+    @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px 16px 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #111827;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(99, 102, 241, 0.12), transparent 42%),
+        radial-gradient(circle at 86% 0%, rgba(16, 185, 129, 0.10), transparent 40%),
+        linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    }
+    .page { max-width: min(1320px, 96vw); margin: 0 auto; }
+    .hero-card {
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 26px;
+      padding: 30px 24px;
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      line-height: 1.65;
+    }
+    h1 {
+      margin: 4px 0 10px;
+      font-size: 1.95rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #0f172a;
+    }
+    p { color: #475569; margin: 0 0 10px; }
+    .strong { font-weight: 700; color: #0f172a; }
+    .flash {
+      margin: 0 0 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      background: #fef2f2;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    {% include '_nav.html' %}
+    <section class="hero-card">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, msg in messages %}
+            <div class="flash {{ category }}">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      <h1>접근 권한이 필요합니다</h1>
+      <p class="strong">슬랙을 통해 Chance에게 권한 부여를 요청해주세요.</p>
+      <p>권한이 등록되면 로그인 후 급여/대시보드 화면을 이용할 수 있습니다.</p>
+    </section>
+  </div>
+</body>
+</html>

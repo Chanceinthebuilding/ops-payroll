@@ -1176,17 +1176,10 @@ def _scope_levels_for_email(email: str) -> dict[str, str]:
     e = str(email or "").strip().lower()
     if e and e in _admin_email_set():
         return {scope: "edit" for scope in PERMISSION_SCOPE_KEYS}
-    cfg = _load_permissions_config()
-    defaults = cfg.get("defaults") if isinstance(cfg.get("defaults"), dict) else {}
-    levels = {
-        scope: _normalize_permission_level(
-            defaults.get(scope),
-            _permission_default_levels()[scope],
-        )
-        for scope in PERMISSION_SCOPE_KEYS
-    }
+    levels = {scope: "none" for scope in PERMISSION_SCOPE_KEYS}
     if not e:
         return levels
+    cfg = _load_permissions_config()
     for row in cfg.get("rows", []):
         if str(row.get("email") or "").strip().lower() != e:
             continue
@@ -1194,6 +1187,19 @@ def _scope_levels_for_email(email: str) -> dict[str, str]:
             levels[scope] = _normalize_permission_level(row.get(scope), levels[scope])
         break
     return levels
+
+
+def _is_user_listed_in_permissions(email: str) -> bool:
+    e = str(email or "").strip().lower()
+    if not e:
+        return False
+    if e in _admin_email_set():
+        return True
+    cfg = _load_permissions_config()
+    for row in cfg.get("rows", []):
+        if str(row.get("email") or "").strip().lower() == e:
+            return True
+    return False
 
 
 def _current_user_scope_level(scope: str) -> str:
@@ -2509,6 +2515,10 @@ def inject_nav():
 
 @app.route("/", methods=["GET"])
 def index():
+    if not auth_disabled():
+        email = (session.get("user_email") or "").strip().lower()
+        if email and not _is_user_listed_in_permissions(email):
+            return render_template("access_request_home.html")
     if not _published_exists():
         return render_template("public_home.html")
     if _can_current_user("payroll", "view"):
@@ -2521,7 +2531,7 @@ def index():
         return redirect(url_for("commercialization_dashboard"))
     if _can_current_user("admin_data", "view"):
         return redirect(url_for("admin_data"))
-    return render_template("public_home.html")
+    return render_template("access_request_home.html")
 
 
 @app.route("/payroll", methods=["GET"])
