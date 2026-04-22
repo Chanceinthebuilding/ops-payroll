@@ -87,6 +87,9 @@
     th, td { padding: 8px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; }
     th { color: #475569; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.01em; text-transform: uppercase; }
     td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .fm-role-summary th,
+    .fm-role-summary td,
+    .fm-role-summary td.num { text-align: center; }
     .muted-card {
       background: rgba(255, 255, 255, 0.72);
       border: 1px dashed #cbd5e1;
@@ -143,7 +146,7 @@
           급여 테이블의 사번(또는 사번 없으면 이름)과 FM 목록을 매칭했습니다.
           (매칭됨 <strong>{{ fm_matched_in_payroll }}</strong> / 급여 행 <strong>{{ fm_payroll_rows }}</strong>)
         </p>
-        <table>
+        <table class="fm-role-summary">
           <thead>
             <tr><th>역할</th><th class="num">인원(고유 사번)</th><th class="num">합산 급여</th></tr>
           </thead>
@@ -169,7 +172,7 @@
     {% endif %}
 
     <section class="layout">
-      <article class="card">
+      <article class="card" style="grid-column: 1 / -1;">
         <h2>일자별 인건비 추이</h2>
         <p class="sub" style="margin: 0 0 10px; font-size: 0.85rem;">막대 <strong>파랑→초록</strong>은 출퇴근 기준 기본·야근 합계입니다. <strong style="color:#b91c1c;">붉은 막대·붉은 글씨</strong>는 급여표의 <strong>주휴1</strong> 열과 같이, 앞뒤 날짜 사이에 끼인 주휴수당 합계입니다.</p>
         {% set mx = chart_max if chart_max else 1 %}
@@ -184,44 +187,10 @@
           {% endfor %}
         </div>
       </article>
-
-      <article class="card">
-        <h2>직원별 급여 Top 10</h2>
-        <table>
-          <thead>
-            <tr><th>직원</th><th>사번</th><th class="num">합산금액</th></tr>
-          </thead>
-          <tbody>
-            {% for r in top_employee_rows %}
-            <tr>
-              <td>{{ r.employee_name }}</td>
-              <td>{{ r.employee_id }}</td>
-              <td class="num">{{ "{:,}".format(r.total_pay) }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </article>
     </section>
 
     <section class="layout" style="margin-top: 14px;">
-      <article class="card">
-        <h2>근태 기준 인건비 Top 10</h2>
-        <table>
-          <thead>
-            <tr><th>직원</th><th class="num">근태기반 인건비</th></tr>
-          </thead>
-          <tbody>
-            {% for r in daily_rank_rows %}
-            <tr>
-              <td>{{ r.employee_name }}</td>
-              <td class="num">{{ "{:,}".format(r.cost) }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </article>
-      <article class="card">
+      <article class="card" style="grid-column: 1 / -1;">
         <h2>주간 인건비 추이 (월~일)</h2>
         {% set mx = (weekly_chart_values|max) if weekly_chart_values else 1 %}
         <div class="trend-list">
