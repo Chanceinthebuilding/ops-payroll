@@ -160,6 +160,7 @@
       top: 10px;
       align-self: start;
       justify-self: stretch;
+      z-index: 20;
     }
     .payroll-top-split__aside .payroll-actions-shell {
       margin-bottom: 0;
@@ -209,6 +210,8 @@
     .payroll-actions-shell .payroll-action-block--archive {
       background: #fafafa;
       border-top-color: #eef2ff;
+      align-items: center;
+      flex-wrap: wrap;
     }
     .pay-action-meta {
       display: flex;
@@ -243,7 +246,7 @@
 
     /* 제목 옆 느낌표 — 호버·포커스 시 설명 패널 */
     .pay-help-tip {
-      position: relative;
+      position: relative; /* 툴팁 기준점 — sticky 테이블보다 위에 표시 */
       flex-shrink: 0;
       width: 18px;
       height: 18px;
@@ -301,6 +304,26 @@
     .pay-help-tip:hover .pay-help-tip-panel,
     .pay-help-tip:focus .pay-help-tip-panel {
       display: block;
+    }
+    /* 보존 타이틀 옆 아이콘만: 툴팁을 위로 — 고정 테이블 헤더에 가리지 않음 */
+    .pay-help-tip--above .pay-help-tip-panel {
+      top: auto;
+      bottom: calc(100% + 8px);
+      z-index: 5000;
+    }
+    .pay-action-controls--archive {
+      flex-wrap: nowrap;
+      justify-content: flex-end;
+    }
+    .pay-archive-hint-below {
+      flex: 1 1 100%;
+      margin-top: 6px;
+      font-size: 0.82rem;
+      color: #64748b;
+      line-height: 1.35;
+    }
+    .pay-archive-hint-below:empty {
+      display: none;
     }
     .pay-action-controls {
       display: flex;
@@ -647,12 +670,12 @@
 
         {% if finalize_snapshot_url %}
         <div class="payroll-action-block payroll-action-block--archive" role="region" aria-label="월별 급여 확정 스냅샷">
-          <div class="pay-action-meta" style="flex-basis:100%;">
+          <div class="pay-action-meta">
             <span class="pay-badge pay-badge--violet">보존</span>
-            <div style="flex:1; min-width:0;">
+            <div>
               <div class="pay-action-heading-row">
                 <span class="pay-action-heading">월별 확정 (영구 보존)</span>
-                <button type="button" class="pay-help-tip" aria-label="안내: 해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요. 현재 공개 데이터 published 전체가 GCS snapshots 폴더에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.">
+                <button type="button" class="pay-help-tip pay-help-tip--above" aria-label="안내: 해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요. 현재 공개 데이터 published 전체가 GCS snapshots 폴더에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.">
                   <span aria-hidden="true">!</span>
                   <span class="pay-help-tip-panel" role="tooltip">
                     해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요.<br><br>
@@ -660,15 +683,15 @@
                   </span>
                 </button>
               </div>
-              <div class="pay-archive-row">
-                <label class="snapshot-month-label">급여 지급월
-                  <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
-                </label>
-                <button type="button" class="btn-pay-archive" id="btnFinalizeSnapshot">스냅샷 저장</button>
-                <span id="snapshotFinalizeHint" class="snapshot-hint" aria-live="polite"></span>
-              </div>
             </div>
           </div>
+          <div class="pay-action-controls pay-action-controls--archive">
+            <label class="snapshot-month-label">급여 지급월
+              <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
+            </label>
+            <button type="button" class="btn-pay-archive" id="btnFinalizeSnapshot">스냅샷 저장</button>
+          </div>
+          <span id="snapshotFinalizeHint" class="snapshot-hint pay-archive-hint-below" aria-live="polite"></span>
         </div>
         {% endif %}
       </div>
