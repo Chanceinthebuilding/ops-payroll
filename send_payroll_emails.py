@@ -30,6 +30,10 @@ from email.mime.text import MIMEText
 from email.utils import formatdate
 from pathlib import Path
 
+# 발송 전에 여기 스프레드시트 ID만 바꿔 주세요. (탭 이름 규칙은 그대로: {년}년{월}월_이메일_발송용_정보)
+# 전체 URL이면 /d/ 와 /edit 사이의 긴 문자열만 넣으면 됩니다.
+SPREADSHEET_ID = "18skwWPXVf6aNMyJb8u7PiExSX_dBcqrNrYciZE0DgWY"
+
 
 def _prompt(msg: str, default: str | None = None) -> str:
     if default is None or default == "":
@@ -301,15 +305,8 @@ def main():
 
     root = Path(__file__).resolve().parent
 
-    # spreadsheet_id 기본값은 기존 생성 코드의 TARGET_SPREADSHEET_ID를 사용합니다.
-    spreadsheet_id = args.spreadsheet_id.strip()
-    if not spreadsheet_id:
-        try:
-            import google_sheet_exporter
-
-            spreadsheet_id = getattr(google_sheet_exporter, "TARGET_SPREADSHEET_ID", "")
-        except Exception:
-            spreadsheet_id = ""
+    # 기본은 파일 상단 SPREADSHEET_ID. 필요 시 --spreadsheet-id 로만 덮어씁니다.
+    spreadsheet_id = (args.spreadsheet_id or SPREADSHEET_ID).strip()
     if not spreadsheet_id:
         spreadsheet_id = _prompt("대상 스프레드시트 ID를 입력하세요 (예: 18skw...)", default="")
 

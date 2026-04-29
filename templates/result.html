@@ -188,6 +188,48 @@
     .btn-publish-save:hover { filter: brightness(1.06); }
     .btn-publish-save:disabled { opacity: 0.65; cursor: wait; }
     .publish-save-hint { font-size: 0.78rem; color: #475569; text-align: right; line-height: 1.35; }
+
+    .snapshot-finalize-bar {
+      margin: 18px 0 22px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+      border: 1px solid #c7d2fe;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+    .snapshot-finalize-bar .row-actions {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 14px;
+    }
+    .snapshot-finalize-bar label.snapshot-month-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      color: #334155;
+    }
+    .snapshot-finalize-bar input[type="month"] {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #94a3b8;
+      font-size: 0.95rem;
+    }
+    .btn-snapshot {
+      background: #4338ca;
+      color: #fff;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-snapshot:hover { filter: brightness(1.07); }
+    .btn-snapshot:disabled { opacity: 0.65; cursor: wait; }
+    .snapshot-hint { font-size: 0.82rem; color: #475569; flex: 1 1 100%; }
   </style>
 </head>
 <body>
@@ -222,6 +264,21 @@
   <div id="publishSaveBar" class="publish-save-bar" style="display:none;" role="region" aria-label="공개 급여 저장">
     <button type="button" class="btn btn-publish-save" id="btnSavePublished">업로드 및 저장</button>
     <span id="publishSaveHint" class="publish-save-hint"></span>
+  </div>
+  {% endif %}
+
+  {% if finalize_snapshot_url %}
+  <div class="snapshot-finalize-bar" role="region" aria-label="월별 급여 확정 스냅샷">
+    <strong>월별 확정 (영구 보존)</strong><br>
+    해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요. 현재 공개 데이터(<code>published/</code>) 전체가
+    GCS <code>snapshots/payroll_YYYYMM/</code> 에 복사되어 보존됩니다. 이후 차월 작업은 관리자 업로드로 이어가면 됩니다.
+    <div class="row-actions">
+      <label class="snapshot-month-label">급여 지급월
+        <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
+      </label>
+      <button type="button" class="btn-snapshot" id="btnFinalizeSnapshot">스냅샷 저장</button>
+      <span id="snapshotFinalizeHint" class="snapshot-hint" aria-live="polite"></span>
+    </div>
   </div>
   {% endif %}
 
@@ -353,6 +410,7 @@
   <script>
     (function() {
         var savePublishedUrl = {{ save_published_url | tojson }};
+        var finalizeSnapshotUrl = {{ finalize_snapshot_url | default(none) | tojson }};
         var payrollTable = document.querySelector('section table.table');
         if (payrollTable) {
           // 급여 재계산 상수 (서버 _recalc_pay_from_date_columns와 동일)
@@ -809,6 +867,74 @@
                 btnSavePub.disabled = false;
                 if (hintSavePub) hintSavePub.textContent = err.message || '요청 실패';
               });
+          });
+        }
+      }
+
+      if (finalizeSnapshotUrl) {
+        var btnSnap = document.getElementById('btnFinalizeSnapshot');
+        var hintSnap = document.getElementById('snapshotFinalizeHint');
+        var inpSnap = document.getElementById('snapshotMonthInput');
+        function postFinalizeSnapshot(overwrite) {
+          if (!inpSnap || !inpSnap.value) {
+            if (hintSnap) hintSnap.textContent = '급여 지급월을 선택하세요.';
+            return;
+          }
+          var parts = inpSnap.value.split('-');
+          var y = parseInt(parts[0], 10);
+          var mo = parseInt(parts[1], 10);
+          if (!y || !mo) {
+            if (hintSnap) hintSnap.textContent = '월 형식이 올바르지 않습니다.';
+            return;
+          }
+          if (btnSnap) btnSnap.disabled = true;
+          if (hintSnap) hintSnap.textContent = '저장 중…';
+          fetch(finalizeSnapshotUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ year: y, month: mo, overwrite: !!overwrite })
+          })
+            .then(function(r) {
+              return r.json().then(function(data) {
+                return { httpOk: r.ok, status: r.status, data: data };
+              });
+            })
+            .then(function(res) {
+              if (btnSnap) btnSnap.disabled = false;
+              var data = res.data || {};
+              if (res.httpOk && data.ok) {
+                if (hintSnap) hintSnap.textContent = data.message || '저장되었습니다.';
+              } else if (res.status === 409 && data.exists) {
+                if (window.confirm((data.error || '이미 스냅샷이 있습니다.') + ' 덮어쓸까요?')) {
+                  postFinalizeSnapshot(true);
+                } else {
+                  if (hintSnap) hintSnap.textContent = '취소했습니다.';
+                }
+              } else {
+                if (hintSnap) hintSnap.textContent = data.error || '저장 실패';
+              }
+            })
+            .catch(function(err) {
+              if (btnSnap) btnSnap.disabled = false;
+              if (hintSnap) hintSnap.textContent = err.message || '요청 실패';
+            });
+        }
+        if (btnSnap) {
+          btnSnap.addEventListener('click', function() {
+            if (!inpSnap || !inpSnap.value) {
+              if (hintSnap) hintSnap.textContent = '급여 지급월을 선택하세요.';
+              return;
+            }
+            var parts = inpSnap.value.split('-');
+            var moLabel = parts[0] + '년 ' + parseInt(parts[1], 10) + '월';
+            if (!window.confirm(
+              moLabel + ' 급여를 확정 스냅샷으로 저장합니다.\n\n' +
+              '현재 공개 데이터 전체가 GCS snapshots/payroll_' + (parts[0] + parts[1]) + '/ 에 보존됩니다. 계속할까요?'
+            )) {
+              return;
+            }
+            postFinalizeSnapshot(false);
           });
         }
       }

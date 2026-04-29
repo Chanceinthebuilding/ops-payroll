@@ -627,6 +627,189 @@ def _published_blob_name(filename: str) -> str:
     return f"published/{filename}"
 
 
+def _snapshot_gcs_prefix_for_yyyymm(yyyymm: str) -> str:
+    """월별 확정 스냅샷: GCS 버킷 내 접두사 (예: snapshots/payroll_202604/)."""
+    return f"snapshots/payroll_{yyyymm}/"
+
+
+def _snapshot_local_dir_for_yyyymm(yyyymm: str) -> Path:
+    return OUTPUT_BASE / "snapshots" / f"payroll_{yyyymm}"
+
+
+def _snapshot_meta_blob_name(yyyymm: str) -> str:
+    return f"{_snapshot_gcs_prefix_for_yyyymm(yyyymm)}snapshot_meta.json"
+
+
+def _snapshot_exists(yyyymm: str) -> bool:
+    """동일 지급월 스냅샷이 이미 있는지 (GCS snapshot_meta 또는 로컬 동일 경로)."""
+    if gcs_enabled():
+        return _gcs_blob_exists(_snapshot_meta_blob_name(yyyymm))
+    d = _snapshot_local_dir_for_yyyymm(yyyymm)
+    return d.is_dir() and (d / "snapshot_meta.json").is_file()
+
+
+def _finalize_payroll_snapshot_to_storage(
+    *,
+    year: int,
+    month: int,
+    overwrite: bool,
+    finalized_by: str,
+) -> tuple[bool, dict | str, int]:
+    """
+    현재 published/ 와 동일한 파일 세트를 snapshots/payroll_YYYYMM/ 에 영구 복사.
+    반환: (성공, payload 또는 에러 문자열, HTTP 상태 코드)
+    """
+    if not (1 <= month <= 12):
+        return False, "월은 1~12 범위여야 합니다.", 400
+    yyyymm = f"{year}{month:02d}"
+
+    if not _published_exists():
+        return False, "공개 급여 데이터가 없어 스냅샷을 만들 수 없습니다.", 400
+
+    if _is_railway_deploy() and not _publish_allow_local_only():
+        if not _gcs_env_configured():
+            return (
+                False,
+                "Railway에서는 재배포 후에도 유지되도록 GCS에 스냅샷을 저장해야 합니다. "
+                "GCP_PROJECT_ID, GCS_BUCKET, GOOGLE_APPLICATION_CREDENTIALS_JSON을 설정하세요.",
+                500,
+            )
+        if not gcs_enabled():
+            return False, "GCS 라이브러리를 불러오지 못했습니다. requirements를 확인하세요.", 500
+
+    if _snapshot_exists(yyyymm) and not overwrite:
+        return (
+            False,
+            f"{year}년 {month}월 스냅샷이 이미 있습니다. 덮어쓰려면 확인 후 다시 시도하세요.",
+            409,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        if not _download_published_to_dir(tmp_dir):
+            return False, "공개 데이터를 불러오지 못했습니다.", 500
+
+        if gcs_enabled():
+            _gcs_download_file(_published_blob_name(PUBLISHED_META_FILENAME), tmp_dir / PUBLISHED_META_FILENAME)
+        elif (PUBLISHED_DIR / PUBLISHED_META_FILENAME).is_file():
+            shutil.copy2(PUBLISHED_DIR / PUBLISHED_META_FILENAME, tmp_dir / PUBLISHED_META_FILENAME)
+
+        bundled: list[str] = []
+        uploads: list[tuple[str, Path]] = []
+        for name in PUBLISHED_FILES:
+            p = tmp_dir / name
+            if p.exists():
+                uploads.append((name, p))
+                bundled.append(name)
+        meta_path = tmp_dir / PUBLISHED_META_FILENAME
+        if meta_path.exists():
+            bundled.append(PUBLISHED_META_FILENAME)
+
+        if not (tmp_dir / "payroll_result.csv").exists():
+            return False, "payroll_result.csv가 없어 스냅샷을 만들 수 없습니다.", 400
+
+        snap_meta = {
+            "payroll_year": year,
+            "payroll_month": month,
+            "yyyymm": yyyymm,
+            "finalized_at": datetime.now(KST).isoformat(),
+            "finalized_by": finalized_by or "",
+            "description": "월별 급여 확정 스냅샷 (당시 published/ 파일 세트 복사)",
+            "bundled_files": bundled,
+        }
+
+        if gcs_enabled():
+            prefix = _snapshot_gcs_prefix_for_yyyymm(yyyymm)
+            try:
+                for name, p in uploads:
+                    _gcs_upload_file(
+                        p,
+                        prefix + name,
+                        content_type="text/csv; charset=utf-8",
+                    )
+                if meta_path.exists():
+                    _gcs_upload_file(
+                        meta_path,
+                        prefix + PUBLISHED_META_FILENAME,
+                        content_type="application/json; charset=utf-8",
+                    )
+                _gcs_upload_text(
+                    json.dumps(snap_meta, ensure_ascii=False, indent=2),
+                    prefix + "snapshot_meta.json",
+                )
+            except Exception as e:
+                logger.exception("finalize snapshot GCS upload")
+                return False, f"GCS 업로드 실패: {e}", 500
+            loc_hint = f"gs://{_gcs_bucket_name()}/{prefix}"
+            msg = f"{year}년 {month}월 급여 스냅샷이 GCS에 저장되었습니다. ({prefix})"
+            return True, {"ok": True, "message": msg, "yyyymm": yyyymm, "gcs_prefix": prefix, "storage": "gcs", "location_hint": loc_hint}, 200
+
+        # 로컬 전용 (개발 또는 ALLOW_PUBLISH_WITHOUT_GCS)
+        dest = _snapshot_local_dir_for_yyyymm(yyyymm)
+        try:
+            if dest.exists() and overwrite:
+                shutil.rmtree(dest)
+            dest.mkdir(parents=True, exist_ok=True)
+            for name, p in uploads:
+                shutil.copy2(p, dest / name)
+            if meta_path.exists():
+                shutil.copy2(meta_path, dest / PUBLISHED_META_FILENAME)
+            (dest / "snapshot_meta.json").write_text(
+                json.dumps(snap_meta, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.exception("finalize snapshot local")
+            return False, f"로컬 스냅샷 저장 실패: {e}", 500
+
+        warn = ""
+        if _is_railway_deploy():
+            warn = " (Railway 로컬 디스크는 재시작 시 사라질 수 있습니다. GCS 설정을 권장합니다.)"
+        msg = f"{year}년 {month}월 스냅샷이 서버 로컬에 저장되었습니다.{warn}"
+        return True, {"ok": True, "message": msg, "yyyymm": yyyymm, "storage": "local", "local_path": str(dest)}, 200
+
+
+def _list_payroll_snapshots_brief() -> list[dict]:
+    """관리자 확인용: 저장된 월별 스냅샷 목록(YYYYMM·저장소)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    if gcs_enabled():
+        bucket = _gcs_bucket()
+        if bucket:
+            try:
+                for blob in bucket.list_blobs(prefix="snapshots/payroll_"):
+                    name = blob.name
+                    if "/snapshot_meta.json" not in name:
+                        continue
+                    # snapshots/payroll_202604/snapshot_meta.json
+                    parts = name.split("/")
+                    if len(parts) >= 2 and parts[1].startswith("payroll_"):
+                        ym = parts[1].replace("payroll_", "", 1)
+                        if len(ym) == 6 and ym.isdigit():
+                            seen.add(ym)
+            except Exception:
+                logger.exception("list snapshots gcs")
+
+    base = OUTPUT_BASE / "snapshots"
+    if base.is_dir():
+        for p in base.iterdir():
+            if p.is_dir() and p.name.startswith("payroll_"):
+                ym = p.name.replace("payroll_", "", 1)
+                if len(ym) == 6 and ym.isdigit() and (p / "snapshot_meta.json").is_file():
+                    seen.add(ym)
+
+    for ym in sorted(seen):
+        out.append(
+            {
+                "yyyymm": ym,
+                "year": int(ym[:4]),
+                "month": int(ym[4:6]),
+            }
+        )
+    return out
+
+
 def _fm_roster_blob_name() -> str:
     return f"metadata/{FM_ROSTER_FILENAME}"
 
@@ -2464,10 +2647,23 @@ def _make_payroll_result_response(
         save_published_url = (
             url_for("save_published_payroll") if allow_published_edit and can_payroll_edit else None
         )
+        finalize_snapshot_url = (
+            url_for("finalize_payroll_snapshot") if allow_published_edit and can_payroll_edit else None
+        )
+        default_snapshot_year, default_snapshot_month = None, None
+        try:
+            from google_sheet_exporter import _infer_payroll_month
+
+            default_snapshot_year, default_snapshot_month = _infer_payroll_month(payroll)
+        except Exception:
+            pass
         html = render_template(
             "result.html",
             export_url=url_for("export_google_sheet"),
             save_published_url=save_published_url,
+            finalize_snapshot_url=finalize_snapshot_url,
+            default_snapshot_year=default_snapshot_year,
+            default_snapshot_month=default_snapshot_month,
             daily=daily_html,
             use_payroll_table=use_payroll_table,
             payroll_rows=payroll_rows,
@@ -2630,6 +2826,52 @@ def save_published_payroll():
         elif not _is_railway_deploy():
             msg += " (서버 로컬 output/published만; GCS 미설정 시 재배포 시 유실 가능)"
         return jsonify({"ok": True, "message": msg, "gcs_synced": gcs_ok})
+
+
+@app.route("/payroll/finalize-snapshot", methods=["POST"])
+def finalize_payroll_snapshot():
+    """관리자: 해당 급여월 확정 스냅샷을 GCS snapshots/payroll_YYYYMM/ 에 영구 저장."""
+    if not _can_current_user("payroll", "edit"):
+        return jsonify({"ok": False, "error": "급여 스냅샷 저장 권한이 없습니다."}), 403
+
+    data = request.get_json(silent=True) or {}
+    year = data.get("year")
+    month = data.get("month")
+    overwrite = bool(data.get("overwrite"))
+
+    try:
+        year_i = int(year)
+        month_i = int(month)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "year·month는 숫자로 보내 주세요."}), 400
+
+    ok, payload, status = _finalize_payroll_snapshot_to_storage(
+        year=year_i,
+        month=month_i,
+        overwrite=overwrite,
+        finalized_by=(session.get("user_email") or ""),
+    )
+    if not ok:
+        assert isinstance(payload, str)
+        body = {"ok": False, "error": payload}
+        if status == 409:
+            body["exists"] = True
+        return jsonify(body), status
+    assert isinstance(payload, dict)
+    return jsonify(payload), status
+
+
+@app.route("/payroll/snapshots", methods=["GET"])
+def list_payroll_snapshots():
+    """저장된 월별 급여 스냅샷 목록(관리자·편집 권한)."""
+    if not _can_current_user("payroll", "edit"):
+        return jsonify({"ok": False, "error": "권한이 없습니다."}), 403
+    try:
+        items = _list_payroll_snapshots_brief()
+        return jsonify({"ok": True, "snapshots": items})
+    except Exception as e:
+        logger.exception("list_payroll_snapshots")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/overtime-status/save", methods=["POST"])
