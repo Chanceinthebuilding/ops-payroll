@@ -810,6 +810,47 @@ def _list_payroll_snapshots_brief() -> list[dict]:
     return out
 
 
+def _download_snapshot_to_dir(yyyymm: str, target_dir: Path) -> bool:
+    """snapshots/payroll_YYYYMM/ 또는 로컬 동일 경로에서 published 와 같은 파일명으로 복사."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if gcs_enabled():
+        prefix = _snapshot_gcs_prefix_for_yyyymm(yyyymm)
+        for name in PUBLISHED_FILES:
+            _gcs_download_file(prefix + name, target_dir / name)
+        return (target_dir / "payroll_result.csv").is_file()
+    src = _snapshot_local_dir_for_yyyymm(yyyymm)
+    if not src.is_dir():
+        return False
+    ok = False
+    for name in PUBLISHED_FILES:
+        p = src / name
+        if p.is_file():
+            shutil.copy2(p, target_dir / name)
+            ok = True
+    return ok and (target_dir / "payroll_result.csv").is_file()
+
+
+def _read_snapshot_meta_dict(yyyymm: str) -> dict | None:
+    """스냅샷 확정 메타(snapshot_meta.json)."""
+    try:
+        if gcs_enabled():
+            fd, tmp_name = tempfile.mkstemp(suffix=".json")
+            os.close(fd)
+            tmp_path = Path(tmp_name)
+            try:
+                if not _gcs_download_file(_snapshot_meta_blob_name(yyyymm), tmp_path):
+                    return None
+                return json.loads(tmp_path.read_text(encoding="utf-8"))
+            finally:
+                tmp_path.unlink(missing_ok=True)
+        p = _snapshot_local_dir_for_yyyymm(yyyymm) / "snapshot_meta.json"
+        if p.is_file():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("read snapshot meta %s", yyyymm)
+    return None
+
+
 def _fm_roster_blob_name() -> str:
     return f"metadata/{FM_ROSTER_FILENAME}"
 
@@ -2399,13 +2440,23 @@ def _make_payroll_result_response(
     allow_published_edit: bool = False,
     back_href: str | None = None,
     back_label: str | None = None,
+    view_mode: str = "published",
+    snapshot_yyyymm: str | None = None,
+    payroll_snapshot_list: list | None = None,
+    snapshot_meta: dict | None = None,
 ):
     import pandas as pd
 
     if back_href is None:
-        back_href = url_for("index") if read_only else url_for("admin_data")
+        if view_mode == "snapshot":
+            back_href = url_for("payroll")
+        else:
+            back_href = url_for("index") if read_only else url_for("admin_data")
     if back_label is None:
-        back_label = "← 홈" if read_only else "← 관리자 데이터"
+        if view_mode == "snapshot":
+            back_label = "← 현재 급여 작업"
+        else:
+            back_label = "← 홈" if read_only else "← 관리자 데이터"
 
     def _err_template():
         if read_only:
@@ -2643,20 +2694,34 @@ def _make_payroll_result_response(
             return _err_template()
 
         can_payroll_edit = _can_current_user("payroll", "edit")
-        can_edit = can_payroll_edit and ((not read_only) or allow_published_edit)
+        is_snapshot_view = view_mode == "snapshot"
+        can_edit = (
+            (not is_snapshot_view)
+            and can_payroll_edit
+            and ((not read_only) or allow_published_edit)
+        )
         save_published_url = (
-            url_for("save_published_payroll") if allow_published_edit and can_payroll_edit else None
+            None
+            if is_snapshot_view
+            else (
+                url_for("save_published_payroll") if allow_published_edit and can_payroll_edit else None
+            )
         )
         finalize_snapshot_url = (
-            url_for("finalize_payroll_snapshot") if allow_published_edit and can_payroll_edit else None
+            None
+            if is_snapshot_view
+            else (
+                url_for("finalize_payroll_snapshot") if allow_published_edit and can_payroll_edit else None
+            )
         )
         default_snapshot_year, default_snapshot_month = None, None
-        try:
-            from google_sheet_exporter import _infer_payroll_month
+        if not is_snapshot_view:
+            try:
+                from google_sheet_exporter import _infer_payroll_month
 
-            default_snapshot_year, default_snapshot_month = _infer_payroll_month(payroll)
-        except Exception:
-            pass
+                default_snapshot_year, default_snapshot_month = _infer_payroll_month(payroll)
+            except Exception:
+                pass
         html = render_template(
             "result.html",
             export_url=url_for("export_google_sheet"),
@@ -2664,6 +2729,10 @@ def _make_payroll_result_response(
             finalize_snapshot_url=finalize_snapshot_url,
             default_snapshot_year=default_snapshot_year,
             default_snapshot_month=default_snapshot_month,
+            payroll_snapshot_list=payroll_snapshot_list or [],
+            snapshot_view_yyyymm=snapshot_yyyymm if is_snapshot_view else None,
+            snapshot_meta=snapshot_meta if is_snapshot_view else None,
+            view_mode=view_mode,
             daily=daily_html,
             use_payroll_table=use_payroll_table,
             payroll_rows=payroll_rows,
@@ -2682,7 +2751,7 @@ def _make_payroll_result_response(
             result_read_only=read_only,
             result_back_href=back_href,
             result_back_label=back_label,
-            export_allowed=can_payroll_edit,
+            export_allowed=can_payroll_edit and not is_snapshot_view,
             table_editable=can_edit,
         )
         resp = make_response(html)
@@ -2738,11 +2807,56 @@ def payroll():
         return redirect(url_for("index"))
     if not _published_exists():
         return redirect(url_for("index"))
+    snap_list: list = []
+    try:
+        snap_list = _list_payroll_snapshots_brief()
+    except Exception:
+        logger.exception("payroll snapshot list")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         if not _download_published_to_dir(tmp_dir):
             return redirect(url_for("index"))
-        return _make_payroll_result_response(tmp_dir, read_only=True, allow_published_edit=True)
+        return _make_payroll_result_response(
+            tmp_dir,
+            read_only=True,
+            allow_published_edit=True,
+            payroll_snapshot_list=snap_list,
+        )
+
+
+@app.route("/payroll/snapshot/<yyyymm>", methods=["GET"])
+def payroll_snapshot_view(yyyymm: str):
+    """확정 스냅샷 읽기 전용 조회. 메인 /payroll 은 현재 작업 중 데이터 유지."""
+    if not _can_current_user("payroll", "view"):
+        flash("급여 데이터 조회 권한이 없습니다.", "error")
+        return redirect(url_for("index"))
+    yyyymm = (yyyymm or "").strip()
+    if len(yyyymm) != 6 or not yyyymm.isdigit():
+        flash("스냅샷 월 형식이 올바르지 않습니다.", "error")
+        return redirect(url_for("payroll"))
+    if not _snapshot_exists(yyyymm):
+        flash("해당 월 스냅샷을 찾을 수 없습니다.", "error")
+        return redirect(url_for("payroll"))
+    snap_list: list = []
+    try:
+        snap_list = _list_payroll_snapshots_brief()
+    except Exception:
+        logger.exception("payroll snapshot list")
+    meta = _read_snapshot_meta_dict(yyyymm)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        if not _download_snapshot_to_dir(yyyymm, tmp_dir):
+            flash("스냅샷 데이터를 불러오지 못했습니다.", "error")
+            return redirect(url_for("payroll"))
+        return _make_payroll_result_response(
+            tmp_dir,
+            read_only=True,
+            allow_published_edit=False,
+            view_mode="snapshot",
+            snapshot_yyyymm=yyyymm,
+            payroll_snapshot_list=snap_list,
+            snapshot_meta=meta,
+        )
 
 
 @app.route("/payroll/save", methods=["POST"])

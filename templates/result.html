@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <title>급여 데이터 — NYJ Payroll Management</title>
+  <title>{% if snapshot_view_yyyymm %}스냅샷 {{ snapshot_view_yyyymm[:4] }}-{{ snapshot_view_yyyymm[4:] }} · {% endif %}급여 데이터 — NYJ Payroll Management</title>
   <style>
     @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
     * { box-sizing: border-box; }
@@ -230,18 +230,90 @@
     .btn-snapshot:hover { filter: brightness(1.07); }
     .btn-snapshot:disabled { opacity: 0.65; cursor: wait; }
     .snapshot-hint { font-size: 0.82rem; color: #475569; flex: 1 1 100%; }
+
+    .snapshot-view-banner {
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border: 1px solid #f59e0b;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+    .snapshot-view-banner .snap-meta { display: block; font-size: 0.82rem; color: #78350f; margin-top: 6px; }
+    .snapshot-view-banner a { color: #92400e; font-weight: 700; }
+
+    .snapshot-picker-bar {
+      margin: 0 0 18px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: #fff;
+      border: 1px solid #cbd5e1;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 14px;
+      font-size: 0.92rem;
+    }
+    .snapshot-picker-bar strong { color: #334155; }
+    .snapshot-picker-bar select {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #94a3b8;
+      font-size: 0.95rem;
+      min-width: 160px;
+    }
+    .btn-snapshot-open {
+      background: #334155;
+      color: #fff;
+      padding: 8px 14px;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    .btn-snapshot-open:hover { filter: brightness(1.08); }
+    .link-current-payroll { color: #0f766e; font-weight: 700; text-decoration: none; margin-left: 4px; }
+    .link-current-payroll:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
   {% include '_nav.html' %}
   <div class="result-shell">
+  {% if snapshot_view_yyyymm %}
+  <div class="snapshot-view-banner">
+    <strong>스냅샷 조회 (읽기 전용)</strong> —
+    {{ snapshot_view_yyyymm[:4] }}년 {{ snapshot_view_yyyymm[4:]|int }}월 확정분입니다. 표시만 가능하며, 수정·내보내기는 현재 작업 데이터에서 진행하세요.
+    {% if snapshot_meta and snapshot_meta.get('finalized_at') %}
+    <span class="snap-meta">확정 시각: {{ snapshot_meta['finalized_at'] }}{% if snapshot_meta.get('finalized_by') %} · 확정: {{ snapshot_meta['finalized_by'] }}{% endif %}</span>
+    {% endif %}
+  </div>
+  {% endif %}
   {% set _ro = result_read_only | default(false) %}
   {% set _editable = table_editable | default(true) %}
   {% set _back_href = result_back_href | default('/', true) %}
   {% set _back_label = result_back_label | default('← 홈', true) %}
   <div class="back"><a href="{{ _back_href }}">{{ _back_label }}</a></div>
   <h1>급여·근무 결과</h1>
-  <p>{% if _ro %}관리자가 등록한 공개 급여 데이터입니다.{% else %}업로드한 엑셀 기준으로 계산된 결과입니다.{% endif %}</p>
+  <p>{% if snapshot_view_yyyymm %}과거에 확정 저장된 스냅샷입니다.
+  {% elif _ro %}관리자가 등록한 공개 급여 데이터입니다.{% else %}업로드한 엑셀 기준으로 계산된 결과입니다.{% endif %}</p>
+
+  {% if payroll_snapshot_list and payroll_snapshot_list|length > 0 %}
+  <div class="snapshot-picker-bar" role="navigation" aria-label="저장된 급여 스냅샷">
+    <strong>{% if snapshot_view_yyyymm %}다른 스냅샷 보기{% else %}저장된 스냅샷 열기{% endif %}</strong>
+    <select id="payrollSnapshotPicker" aria-label="스냅샷 월 선택">
+      <option value="">선택…</option>
+      {% for s in payroll_snapshot_list %}
+      <option value="{{ s.yyyymm }}"{% if snapshot_view_yyyymm == s.yyyymm %} selected{% endif %}>{{ s.year }}년 {{ '%02d'|format(s.month) }}월 ({{ s.yyyymm }})</option>
+      {% endfor %}
+    </select>
+    <button type="button" class="btn btn-snapshot-open" id="btnOpenPayrollSnapshot">열기</button>
+    {% if snapshot_view_yyyymm %}
+    <a href="{{ url_for('payroll') }}" class="link-current-payroll">현재 작업 중 데이터로 →</a>
+    {% endif %}
+  </div>
+  {% endif %}
   {% if export_allowed | default(false) %}
   <p style="margin-bottom: 16px;">
     <button type="button" class="btn btn-export" id="btnExportGoogle">구글 시트 내보내기</button>
@@ -411,6 +483,15 @@
     (function() {
         var savePublishedUrl = {{ save_published_url | tojson }};
         var finalizeSnapshotUrl = {{ finalize_snapshot_url | default(none) | tojson }};
+        var btnSnapPick = document.getElementById('btnOpenPayrollSnapshot');
+        var selSnap = document.getElementById('payrollSnapshotPicker');
+        if (btnSnapPick && selSnap) {
+          btnSnapPick.addEventListener('click', function() {
+            var v = selSnap.value;
+            if (!v) return;
+            window.location.href = '/payroll/snapshot/' + encodeURIComponent(v);
+          });
+        }
         var payrollTable = document.querySelector('section table.table');
         if (payrollTable) {
           // 급여 재계산 상수 (서버 _recalc_pay_from_date_columns와 동일)

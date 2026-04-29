@@ -73,7 +73,7 @@
     <nav style="display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; font-size:0.82rem;">
       <span style="color:#64748b; font-weight:500;">{{ current_user_email }}</span>
       {% if can_view_payroll %}
-      <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' %}is-active{% endif %}">급여 데이터 관리</a>
+      <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' or ep == 'payroll_snapshot_view' %}is-active{% endif %}">급여 데이터 관리</a>
       {% endif %}
       {% if can_view_dashboard %}
       <a href="{{ url_for('dashboard') }}" class="nav-pill {% if ep == 'dashboard' %}is-active{% endif %}">인건비 대시보드</a>
@@ -92,7 +92,7 @@
     {% else %}
     <nav style="display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; font-size:0.82rem;">
       {% if can_view_payroll %}
-      <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' %}is-active{% endif %}">급여 데이터 관리</a>
+      <a href="{{ url_for('payroll') }}" class="nav-pill {% if ep == 'payroll' or ep == 'payroll_snapshot_view' %}is-active{% endif %}">급여 데이터 관리</a>
       {% endif %}
       {% if can_view_dashboard %}
       <a href="{{ url_for('dashboard') }}" class="nav-pill {% if ep == 'dashboard' %}is-active{% endif %}">인건비 대시보드</a>
