@@ -168,13 +168,6 @@
     .payroll-actions-shell--aside .payroll-action-block {
       padding: 12px 14px;
     }
-    .payroll-actions-shell--aside .pay-action-sub {
-      max-width: none;
-      font-size: 0.8rem;
-    }
-    .payroll-actions-shell--aside .pay-archive-note {
-      font-size: 0.78rem;
-    }
     .payroll-actions-shell--aside .pay-action-controls select {
       min-width: 160px;
     }
@@ -198,7 +191,7 @@
       border: 1px solid #e2e8f0;
       background: #fff;
       box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 10px 28px rgba(15, 23, 42, 0.04);
-      overflow: hidden;
+      overflow: visible;
     }
     .payroll-actions-shell .payroll-action-block {
       display: flex;
@@ -237,8 +230,78 @@
     .pay-badge--blue { background: #dbeafe; color: #1d4ed8; }
     .pay-badge--slate { background: #f1f5f9; color: #475569; }
     .pay-badge--violet { background: #ede9fe; color: #5b21b6; }
+    .pay-action-heading-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: nowrap;
+      margin-bottom: 2px;
+    }
+    .pay-action-heading-row .pay-action-heading { margin-bottom: 0; }
     .pay-action-heading { font-weight: 700; font-size: 0.98rem; color: #0f172a; margin-bottom: 2px; }
     .pay-action-sub { font-size: 0.84rem; color: #64748b; line-height: 1.45; max-width: 42rem; }
+
+    /* 제목 옆 느낌표 — 호버·포커스 시 설명 패널 */
+    .pay-help-tip {
+      position: relative;
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid #94a3b8;
+      background: #f1f5f9;
+      color: #475569;
+      font-size: 0.72rem;
+      font-weight: 800;
+      line-height: 1;
+      padding: 0;
+      cursor: help;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .pay-help-tip:hover,
+    .pay-help-tip:focus-visible {
+      border-color: #64748b;
+      background: #e2e8f0;
+      color: #0f172a;
+      outline: none;
+    }
+    .pay-help-tip:focus-visible {
+      box-shadow: 0 0 0 2px #fff, 0 0 0 4px #94a3b8;
+    }
+    .pay-help-tip-panel {
+      display: none;
+      position: absolute;
+      left: 50%;
+      top: calc(100% + 8px);
+      bottom: auto;
+      transform: translateX(-50%);
+      min-width: 220px;
+      max-width: min(340px, 88vw);
+      padding: 10px 12px;
+      background: #1e293b;
+      color: #f1f5f9;
+      font-size: 0.78rem;
+      font-weight: 500;
+      line-height: 1.5;
+      border-radius: 8px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.35);
+      z-index: 60;
+      text-align: left;
+      pointer-events: none;
+    }
+    .pay-help-tip-panel code {
+      font-size: 0.85em;
+      background: rgba(255, 255, 255, 0.14);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #e2e8f0;
+    }
+    .pay-help-tip:hover .pay-help-tip-panel,
+    .pay-help-tip:focus .pay-help-tip-panel {
+      display: block;
+    }
     .pay-action-controls {
       display: flex;
       flex-wrap: wrap;
@@ -540,8 +603,13 @@
           <div class="pay-action-meta">
             <span class="pay-badge pay-badge--blue">연동</span>
             <div>
-              <div class="pay-action-heading">구글 시트 내보내기</div>
-              <div class="pay-action-sub">편집한 표를 새 구글 스프레드시트 탭으로 반영합니다.</div>
+              <div class="pay-action-heading-row">
+                <span class="pay-action-heading">구글 시트 내보내기</span>
+                <button type="button" class="pay-help-tip" aria-label="안내: 편집한 표를 새 구글 스프레드시트 탭으로 반영합니다.">
+                  <span aria-hidden="true">!</span>
+                  <span class="pay-help-tip-panel" role="tooltip">편집한 표를 새 구글 스프레드시트 탭으로 반영합니다.</span>
+                </button>
+              </div>
             </div>
           </div>
           <button type="button" class="btn-pay-primary" id="btnExportGoogle">내보내기</button>
@@ -553,8 +621,13 @@
           <div class="pay-action-meta">
             <span class="pay-badge pay-badge--slate">조회</span>
             <div>
-              <div class="pay-action-heading">{% if snapshot_view_yyyymm %}다른 확정본{% else %}저장된 확정본{% endif %}</div>
-              <div class="pay-action-sub">월별 확정 시 보존해 둔 데이터입니다. 조회만 가능합니다.</div>
+              <div class="pay-action-heading-row">
+                <span class="pay-action-heading">{% if snapshot_view_yyyymm %}다른 확정본{% else %}저장된 확정본{% endif %}</span>
+                <button type="button" class="pay-help-tip" aria-label="안내: 월별 확정 시 보존해 둔 데이터입니다. 조회만 가능합니다.">
+                  <span aria-hidden="true">!</span>
+                  <span class="pay-help-tip-panel" role="tooltip">월별 확정 시 보존해 둔 데이터입니다. 조회만 가능합니다.</span>
+                </button>
+              </div>
             </div>
           </div>
           <div class="pay-action-controls">
@@ -577,9 +650,16 @@
           <div class="pay-action-meta" style="flex-basis:100%;">
             <span class="pay-badge pay-badge--violet">보존</span>
             <div style="flex:1; min-width:0;">
-              <div class="pay-action-heading">월별 확정 (영구 보존)</div>
-              <div class="pay-action-sub">해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요.</div>
-              <p class="pay-archive-note">현재 공개 데이터(<code>published/</code>) 전체가 GCS <code>snapshots/payroll_YYYYMM/</code> 에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.</p>
+              <div class="pay-action-heading-row">
+                <span class="pay-action-heading">월별 확정 (영구 보존)</span>
+                <button type="button" class="pay-help-tip" aria-label="안내: 해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요. 현재 공개 데이터 published 전체가 GCS snapshots 폴더에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.">
+                  <span aria-hidden="true">!</span>
+                  <span class="pay-help-tip-panel" role="tooltip">
+                    해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요.<br><br>
+                    현재 공개 데이터(<code>published/</code>) 전체가 GCS <code>snapshots/payroll_YYYYMM/</code> 에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.
+                  </span>
+                </button>
+              </div>
               <div class="pay-archive-row">
                 <label class="snapshot-month-label">급여 지급월
                   <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
