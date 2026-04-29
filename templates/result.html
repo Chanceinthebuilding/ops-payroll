@@ -25,12 +25,20 @@
       padding: 0 14px;
       box-sizing: border-box;
     }
-    h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    h1 { font-size: 1.45rem; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 6px; color: #0f172a; }
+    .page-header-payroll { margin-bottom: 20px; max-width: 960px; }
+    .page-lede {
+      margin: 0;
+      font-size: 0.94rem;
+      color: #64748b;
+      line-height: 1.55;
+    }
+    .page-back { margin-bottom: 18px; }
     .back { margin-bottom: 24px; }
-    .back a { color: #06c; text-decoration: none; }
+    .back a { color: #2563eb; text-decoration: none; font-weight: 600; font-size: 0.92rem; }
     .back a:hover { text-decoration: underline; }
     section { margin-bottom: 40px; }
-    section h2 { font-size: 1.2rem; margin-bottom: 12px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+    section h2 { font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
     .table-wrap { overflow-x: auto; margin-top: 8px; }
     /* 급여 결과: 안쪽 가로 스크롤 제거 — 테이블이 문서 폭만큼 펼쳐짐(넘치면 브라우저 창 스크롤만) */
     .table-wrap-payroll {
@@ -126,6 +134,202 @@
     .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
     .btn-export { background: #1a73e8; color: #fff; }
     .btn-export:hover { background: #1557b0; }
+
+    /* ── 상단 작업 패널 (내보내기 · 스냅샷) ── */
+    .payroll-actions-shell {
+      max-width: 960px;
+      margin-bottom: 28px;
+      border-radius: 14px;
+      border: 1px solid #e2e8f0;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 10px 28px rgba(15, 23, 42, 0.04);
+      overflow: hidden;
+    }
+    .payroll-actions-shell .payroll-action-block {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px 20px;
+      padding: 16px 18px;
+      border-top: 1px solid #f1f5f9;
+    }
+    .payroll-actions-shell .payroll-action-block:first-child { border-top: none; }
+    .payroll-actions-shell .payroll-action-block--primary {
+      background: linear-gradient(180deg, #fafbff 0%, #fff 52%);
+    }
+    .payroll-actions-shell .payroll-action-block--archive {
+      background: #fafafa;
+      border-top-color: #eef2ff;
+    }
+    .pay-action-meta {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      flex: 1 1 220px;
+      min-width: 0;
+    }
+    .pay-badge {
+      flex-shrink: 0;
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .pay-badge--blue { background: #dbeafe; color: #1d4ed8; }
+    .pay-badge--slate { background: #f1f5f9; color: #475569; }
+    .pay-badge--violet { background: #ede9fe; color: #5b21b6; }
+    .pay-action-heading { font-weight: 700; font-size: 0.98rem; color: #0f172a; margin-bottom: 2px; }
+    .pay-action-sub { font-size: 0.84rem; color: #64748b; line-height: 1.45; max-width: 42rem; }
+    .pay-action-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .pay-action-controls select {
+      padding: 8px 11px;
+      border-radius: 9px;
+      border: 1px solid #cbd5e1;
+      font-size: 0.92rem;
+      min-width: 200px;
+      background: #fff;
+    }
+    .btn-pay-primary {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 0.92rem;
+      cursor: pointer;
+      background: #2563eb;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+      white-space: nowrap;
+    }
+    .btn-pay-primary:hover { filter: brightness(1.05); }
+    .btn-pay-secondary {
+      padding: 9px 16px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 0.88rem;
+      cursor: pointer;
+      background: #fff;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+      white-space: nowrap;
+    }
+    .btn-pay-secondary:hover { background: #f8fafc; border-color: #94a3b8; }
+    .btn-pay-archive {
+      padding: 9px 17px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 0.88rem;
+      cursor: pointer;
+      background: #5b21b6;
+      color: #fff;
+      white-space: nowrap;
+    }
+    .btn-pay-archive:hover { filter: brightness(1.06); }
+    .btn-pay-archive:disabled { opacity: 0.65; cursor: wait; }
+    .pay-archive-note {
+      margin: 0;
+      font-size: 0.82rem;
+      color: #64748b;
+      line-height: 1.5;
+      width: 100%;
+      flex-basis: 100%;
+    }
+    .pay-archive-note code { font-size: 0.78em; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
+    .pay-archive-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 14px;
+      margin-top: 12px;
+    }
+    .pay-archive-row label.snapshot-month-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      color: #334155;
+      font-size: 0.9rem;
+    }
+    .pay-archive-row input[type="month"] {
+      padding: 8px 11px;
+      border-radius: 9px;
+      border: 1px solid #cbd5e1;
+      font-size: 0.92rem;
+    }
+    .link-current-payroll {
+      font-weight: 700;
+      font-size: 0.88rem;
+      color: #0d9488;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .link-current-payroll:hover { text-decoration: underline; }
+
+    /* ── 급여 표 도구줄 (범례 · 필터) ── */
+    .payroll-table-toolbar {
+      margin: 14px 0 16px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: #fafafa;
+      border: 1px solid #ececec;
+    }
+    .payroll-legend-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      align-items: center;
+      margin: 0 0 12px;
+      padding: 0;
+      list-style: none;
+    }
+    .payroll-legend-chips li {
+      font-size: 0.78rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    .payroll-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      align-items: center;
+      font-size: 0.88rem;
+      color: #334155;
+    }
+    .payroll-filters > span.filter-label { font-weight: 700; color: #475569; margin-right: 4px; }
+    .payroll-filters label { cursor: pointer; white-space: nowrap; }
+    .payroll-filters input[type="radio"] { vertical-align: middle; margin-right: 4px; }
+    .payroll-filters select#payrollEmployeeFilter {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      font-size: 0.88rem;
+      min-width: 140px;
+    }
+    .payroll-autofill {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed #e2e8f0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      align-items: center;
+      font-size: 0.86rem;
+      color: #334155;
+    }
+    .payroll-autofill strong { color: #0f172a; }
+    .payroll-autofill .autofill-hint { flex: 1 1 220px; color: #64748b; font-size: 0.82rem; line-height: 1.45; min-width: 0; }
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
     .modal-overlay.open { display: flex; }
     .modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 420px; width: 90%; }
@@ -189,93 +393,25 @@
     .btn-publish-save:disabled { opacity: 0.65; cursor: wait; }
     .publish-save-hint { font-size: 0.78rem; color: #475569; text-align: right; line-height: 1.35; }
 
-    .snapshot-finalize-bar {
-      margin: 18px 0 22px;
-      padding: 14px 16px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
-      border: 1px solid #c7d2fe;
-      font-size: 0.9rem;
-      line-height: 1.5;
+    .snapshot-hint {
+      font-size: 0.82rem;
+      color: #64748b;
+      flex: 1;
+      min-width: 120px;
     }
-    .snapshot-finalize-bar .row-actions {
-      margin-top: 10px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px 14px;
-    }
-    .snapshot-finalize-bar label.snapshot-month-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-weight: 600;
-      color: #334155;
-    }
-    .snapshot-finalize-bar input[type="month"] {
-      padding: 6px 10px;
-      border-radius: 8px;
-      border: 1px solid #94a3b8;
-      font-size: 0.95rem;
-    }
-    .btn-snapshot {
-      background: #4338ca;
-      color: #fff;
-      padding: 8px 16px;
-      border: none;
-      border-radius: 10px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .btn-snapshot:hover { filter: brightness(1.07); }
-    .btn-snapshot:disabled { opacity: 0.65; cursor: wait; }
-    .snapshot-hint { font-size: 0.82rem; color: #475569; flex: 1 1 100%; }
 
     .snapshot-view-banner {
-      margin-bottom: 14px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-      border: 1px solid #f59e0b;
+      margin-bottom: 18px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+      border: 1px solid #fbbf24;
       font-size: 0.92rem;
       line-height: 1.45;
+      max-width: 960px;
     }
     .snapshot-view-banner .snap-meta { display: block; font-size: 0.82rem; color: #78350f; margin-top: 6px; }
     .snapshot-view-banner a { color: #92400e; font-weight: 700; }
-
-    .snapshot-picker-bar {
-      margin: 0 0 18px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      background: #fff;
-      border: 1px solid #cbd5e1;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px 14px;
-      font-size: 0.92rem;
-    }
-    .snapshot-picker-bar strong { color: #334155; }
-    .snapshot-picker-bar select {
-      padding: 6px 10px;
-      border-radius: 8px;
-      border: 1px solid #94a3b8;
-      font-size: 0.95rem;
-      min-width: 160px;
-    }
-    .btn-snapshot-open {
-      background: #334155;
-      color: #fff;
-      padding: 8px 14px;
-      border: none;
-      border-radius: 8px;
-      font-weight: 700;
-      cursor: pointer;
-      font-size: 0.88rem;
-    }
-    .btn-snapshot-open:hover { filter: brightness(1.08); }
-    .link-current-payroll { color: #0f766e; font-weight: 700; text-decoration: none; margin-left: 4px; }
-    .link-current-payroll:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -294,31 +430,75 @@
   {% set _editable = table_editable | default(true) %}
   {% set _back_href = result_back_href | default('/', true) %}
   {% set _back_label = result_back_label | default('← 홈', true) %}
-  <div class="back"><a href="{{ _back_href }}">{{ _back_label }}</a></div>
-  <h1>급여·근무 결과</h1>
-  <p>{% if snapshot_view_yyyymm %}과거에 확정 저장된 스냅샷입니다.
-  {% elif _ro %}관리자가 등록한 공개 급여 데이터입니다.{% else %}업로드한 엑셀 기준으로 계산된 결과입니다.{% endif %}</p>
+  <div class="back page-back"><a href="{{ _back_href }}">{{ _back_label }}</a></div>
+  <header class="page-header-payroll">
+    <h1>급여·근무 결과</h1>
+    <p class="page-lede">{% if snapshot_view_yyyymm %}과거에 확정 저장된 스냅샷입니다.
+    {% elif _ro %}관리자가 등록한 공개 급여 데이터입니다.{% else %}업로드한 엑셀 기준으로 계산된 결과입니다.{% endif %}</p>
+  </header>
 
-  {% if payroll_snapshot_list and payroll_snapshot_list|length > 0 %}
-  <div class="snapshot-picker-bar" role="navigation" aria-label="저장된 급여 스냅샷">
-    <strong>{% if snapshot_view_yyyymm %}다른 스냅샷 보기{% else %}저장된 스냅샷 열기{% endif %}</strong>
-    <select id="payrollSnapshotPicker" aria-label="스냅샷 월 선택">
-      <option value="">선택…</option>
-      {% for s in payroll_snapshot_list %}
-      <option value="{{ s.yyyymm }}"{% if snapshot_view_yyyymm == s.yyyymm %} selected{% endif %}>{{ s.year }}년 {{ '%02d'|format(s.month) }}월 ({{ s.yyyymm }})</option>
-      {% endfor %}
-    </select>
-    <button type="button" class="btn btn-snapshot-open" id="btnOpenPayrollSnapshot">열기</button>
-    {% if snapshot_view_yyyymm %}
-    <a href="{{ url_for('payroll') }}" class="link-current-payroll">현재 작업 중 데이터로 →</a>
+  {% if (export_allowed | default(false)) or ((payroll_snapshot_list | default([]))|length > 0) or finalize_snapshot_url %}
+  <div class="payroll-actions-shell" aria-label="급여 작업 및 스냅샷">
+    {% if export_allowed | default(false) %}
+    <div class="payroll-action-block payroll-action-block--primary">
+      <div class="pay-action-meta">
+        <span class="pay-badge pay-badge--blue">연동</span>
+        <div>
+          <div class="pay-action-heading">구글 시트 내보내기</div>
+          <div class="pay-action-sub">편집한 표를 새 구글 스프레드시트 탭으로 반영합니다.</div>
+        </div>
+      </div>
+      <button type="button" class="btn-pay-primary" id="btnExportGoogle">내보내기</button>
+    </div>
+    {% endif %}
+
+    {% if (payroll_snapshot_list | default([]))|length > 0 %}
+    <div class="payroll-action-block" role="navigation" aria-label="저장된 급여 스냅샷">
+      <div class="pay-action-meta">
+        <span class="pay-badge pay-badge--slate">조회</span>
+        <div>
+          <div class="pay-action-heading">{% if snapshot_view_yyyymm %}다른 확정본{% else %}저장된 확정본{% endif %}</div>
+          <div class="pay-action-sub">월별 확정 시 보존해 둔 데이터입니다. 조회만 가능합니다.</div>
+        </div>
+      </div>
+      <div class="pay-action-controls">
+        <select id="payrollSnapshotPicker" aria-label="스냅샷 월 선택">
+          <option value="">월 선택…</option>
+          {% for s in payroll_snapshot_list %}
+          <option value="{{ s.yyyymm }}"{% if snapshot_view_yyyymm == s.yyyymm %} selected{% endif %}>{{ s.year }}년 {{ '%02d'|format(s.month) }}월 ({{ s.yyyymm }})</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="btn-pay-secondary" id="btnOpenPayrollSnapshot">열기</button>
+        {% if snapshot_view_yyyymm %}
+        <a href="{{ url_for('payroll') }}" class="link-current-payroll">현재 작업으로 →</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if finalize_snapshot_url %}
+    <div class="payroll-action-block payroll-action-block--archive" role="region" aria-label="월별 급여 확정 스냅샷">
+      <div class="pay-action-meta" style="flex-basis:100%;">
+        <span class="pay-badge pay-badge--violet">보존</span>
+        <div style="flex:1; min-width:0;">
+          <div class="pay-action-heading">월별 확정 (영구 보존)</div>
+          <div class="pay-action-sub">해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요.</div>
+          <p class="pay-archive-note">현재 공개 데이터(<code>published/</code>) 전체가 GCS <code>snapshots/payroll_YYYYMM/</code> 에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.</p>
+          <div class="pay-archive-row">
+            <label class="snapshot-month-label">급여 지급월
+              <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
+            </label>
+            <button type="button" class="btn-pay-archive" id="btnFinalizeSnapshot">스냅샷 저장</button>
+            <span id="snapshotFinalizeHint" class="snapshot-hint" aria-live="polite"></span>
+          </div>
+        </div>
+      </div>
+    </div>
     {% endif %}
   </div>
   {% endif %}
-  {% if export_allowed | default(false) %}
-  <p style="margin-bottom: 16px;">
-    <button type="button" class="btn btn-export" id="btnExportGoogle">구글 시트 내보내기</button>
-  </p>
 
+  {% if export_allowed | default(false) %}
   <div class="modal-overlay" id="exportModal">
     <div class="modal">
       <h3>구글 시트 내보내기</h3>
@@ -339,55 +519,40 @@
   </div>
   {% endif %}
 
-  {% if finalize_snapshot_url %}
-  <div class="snapshot-finalize-bar" role="region" aria-label="월별 급여 확정 스냅샷">
-    <strong>월별 확정 (영구 보존)</strong><br>
-    해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요. 현재 공개 데이터(<code>published/</code>) 전체가
-    GCS <code>snapshots/payroll_YYYYMM/</code> 에 복사되어 보존됩니다. 이후 차월 작업은 관리자 업로드로 이어가면 됩니다.
-    <div class="row-actions">
-      <label class="snapshot-month-label">급여 지급월
-        <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
-      </label>
-      <button type="button" class="btn-snapshot" id="btnFinalizeSnapshot">스냅샷 저장</button>
-      <span id="snapshotFinalizeHint" class="snapshot-hint" aria-live="polite"></span>
-    </div>
-  </div>
-  {% endif %}
-
   <section>
     <h2>급여 결과 (payroll_result)</h2>
-    <p class="legend">
-      <span class="cell-paid_leave" style="padding:2px 8px;">연차(유급)</span>
-      <span class="cell-unpaid_leave" style="padding:2px 8px; margin-left:8px;">오프/무급</span>
-      <span class="cell-mixed_leave" style="padding:2px 8px; margin-left:8px;">유급+무급(같은 날)</span>
-      <span class="cell-absent" style="padding:2px 8px; margin-left:8px;">결근/이상</span>
-      <span class="text-non-half" style="margin-left:8px;">소수 .0·.5 아님</span>
-      <span class="cell-over-8" style="padding:2px 8px; margin-left:8px;">8시간 초과</span>
-    </p>
-    <p class="filter-legend" style="margin: 12px 0;">
-      <label><input type="radio" name="payrollFilter" value="전체보기" checked> 전체보기</label>
-      <label style="margin-left: 16px;"><input type="radio" name="payrollFilter" value="정규직"> 정규직</label>
-      <label style="margin-left: 16px;"><input type="radio" name="payrollFilter" value="상용직"> 상용직</label>
-      <label style="margin-left: 16px;"><input type="radio" name="payrollFilter" value="프리랜스"> 프리랜스</label>
-      <label style="margin-left: 16px;">직원 선택</label>
-      <select id="payrollEmployeeFilter" style="margin-left: 4px;">
-        <option value="">전체 직원</option>
-      </select>
-    </p>
-    {% if _editable %}
-    <p class="autofill-legend" style="margin: 12px 0;">
-      <strong>빈칸 자동채우기:</strong>
-      <label style="margin-left: 8px;"><input type="checkbox" id="autofillUseContract" checked> 계약 근무시간 적용</label>
-      <label style="margin-left: 8px;">대상</label>
-      <select id="autofillTarget" style="margin-left: 4px;">
-        <option value="">전체 일자</option>
-      </select>
-      <label style="margin-left: 12px;">채울 시간(시간)</label>
-      <input type="number" id="autofillHours" value="8" min="0" max="24" step="0.5" style="width: 60px; margin-left: 4px;">
-      <button type="button" class="btn btn-autofill" id="btnAutofill" style="margin-left: 8px; background: #28a745; color: #fff;">적용</button>
-      <span class="autofill-hint" style="margin-left: 8px; color: #666; font-size: 0.9rem;">계약 적용 시 6·7·8시간 등 직원별 소정근로시간으로 채웁니다. 적용 시 기본급~합계가 자동 재계산됩니다.</span>
-    </p>
-    {% endif %}
+    <div class="payroll-table-toolbar">
+      <ul class="payroll-legend-chips" aria-label="셀 색 범례">
+        <li class="cell-paid_leave">연차(유급)</li>
+        <li class="cell-unpaid_leave">오프/무급</li>
+        <li class="cell-mixed_leave">유급+무급(같은 날)</li>
+        <li class="cell-absent">결근/이상</li>
+        <li class="text-non-half">소수 .0·.5 아님</li>
+        <li class="cell-over-8">8시간 초과</li>
+      </ul>
+      <div class="payroll-filters">
+        <span class="filter-label">표시</span>
+        <label><input type="radio" name="payrollFilter" value="전체보기" checked> 전체보기</label>
+        <label><input type="radio" name="payrollFilter" value="정규직"> 정규직</label>
+        <label><input type="radio" name="payrollFilter" value="상용직"> 상용직</label>
+        <label><input type="radio" name="payrollFilter" value="프리랜스"> 프리랜스</label>
+        <label>직원 <select id="payrollEmployeeFilter" aria-label="직원 필터">
+          <option value="">전체 직원</option>
+        </select></label>
+      </div>
+      {% if _editable %}
+      <div class="payroll-autofill">
+        <strong>빈칸 자동채우기</strong>
+        <label><input type="checkbox" id="autofillUseContract" checked> 계약 근무시간 적용</label>
+        <label>대상 <select id="autofillTarget">
+          <option value="">전체 일자</option>
+        </select></label>
+        <label>시간 <input type="number" id="autofillHours" value="8" min="0" max="24" step="0.5" style="width: 56px;"></label>
+        <button type="button" class="btn btn-autofill" id="btnAutofill" style="background: #059669; color: #fff; border: none; padding: 7px 14px; border-radius: 8px; font-weight: 600; cursor: pointer;">적용</button>
+        <span class="autofill-hint">계약 적용 시 직원별 소정근로시간으로 채웁니다. 적용 시 기본급~합계가 자동 재계산됩니다.</span>
+      </div>
+      {% endif %}
+    </div>
     <div class="table-wrap table-wrap-payroll">
       <div class="table-wrap-x">
       {% if use_payroll_table %}
