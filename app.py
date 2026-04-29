@@ -2687,7 +2687,6 @@ def _make_payroll_result_response(
         payroll_html_fallback = None if use_payroll_table else payroll.to_html(classes="table", index=False)
 
         try:
-            daily_html = daily.to_html(classes="table", index=False)
             anomaly_html = anomaly.to_html(classes="table", index=False) if not anomaly.empty else None
         except Exception as e:
             flash(f"결과 테이블 생성 중 오류: {e}", "error")
@@ -2733,7 +2732,6 @@ def _make_payroll_result_response(
             snapshot_view_yyyymm=snapshot_yyyymm if is_snapshot_view else None,
             snapshot_meta=snapshot_meta if is_snapshot_view else None,
             view_mode=view_mode,
-            daily=daily_html,
             use_payroll_table=use_payroll_table,
             payroll_rows=payroll_rows,
             payroll_html_fallback=payroll_html_fallback,
