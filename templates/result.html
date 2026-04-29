@@ -26,7 +26,7 @@
       box-sizing: border-box;
     }
     h1 { font-size: 1.45rem; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 6px; color: #0f172a; }
-    .page-header-payroll { margin-bottom: 20px; max-width: 960px; }
+    .page-header-payroll { margin-bottom: 20px; max-width: none; }
     .page-lede {
       margin: 0;
       font-size: 0.94rem;
@@ -134,6 +134,61 @@
     .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
     .btn-export { background: #1a73e8; color: #fff; }
     .btn-export:hover { background: #1557b0; }
+
+    /* ── 급여 결과 제목·필터 | 작업 패널 — 한 행 2열 ── */
+    .payroll-top-split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 440px);
+      gap: 20px 28px;
+      align-items: start;
+      margin-bottom: 18px;
+    }
+    .payroll-top-split--single {
+      grid-template-columns: 1fr;
+    }
+    .payroll-top-split__main {
+      min-width: 0;
+    }
+    .payroll-top-split__main > h2 {
+      margin: 0 0 10px;
+      font-size: 1.15rem;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .payroll-top-split__aside {
+      position: sticky;
+      top: 10px;
+      align-self: start;
+      justify-self: stretch;
+    }
+    .payroll-top-split__aside .payroll-actions-shell {
+      margin-bottom: 0;
+      max-width: none;
+    }
+    .payroll-actions-shell--aside .payroll-action-block {
+      padding: 12px 14px;
+    }
+    .payroll-actions-shell--aside .pay-action-sub {
+      max-width: none;
+      font-size: 0.8rem;
+    }
+    .payroll-actions-shell--aside .pay-archive-note {
+      font-size: 0.78rem;
+    }
+    .payroll-actions-shell--aside .pay-action-controls select {
+      min-width: 160px;
+    }
+    .payroll-top-split__main .payroll-table-toolbar {
+      margin: 10px 0 14px;
+    }
+    @media (max-width: 1100px) {
+      .payroll-top-split:not(.payroll-top-split--single) {
+        grid-template-columns: 1fr;
+      }
+      .payroll-top-split__aside {
+        position: static;
+      }
+    }
 
     /* ── 상단 작업 패널 (내보내기 · 스냅샷) ── */
     .payroll-actions-shell {
@@ -437,66 +492,109 @@
     {% elif _ro %}관리자가 등록한 공개 급여 데이터입니다.{% else %}업로드한 엑셀 기준으로 계산된 결과입니다.{% endif %}</p>
   </header>
 
-  {% if (export_allowed | default(false)) or ((payroll_snapshot_list | default([]))|length > 0) or finalize_snapshot_url %}
-  <div class="payroll-actions-shell" aria-label="급여 작업 및 스냅샷">
-    {% if export_allowed | default(false) %}
-    <div class="payroll-action-block payroll-action-block--primary">
-      <div class="pay-action-meta">
-        <span class="pay-badge pay-badge--blue">연동</span>
-        <div>
-          <div class="pay-action-heading">구글 시트 내보내기</div>
-          <div class="pay-action-sub">편집한 표를 새 구글 스프레드시트 탭으로 반영합니다.</div>
-        </div>
-      </div>
-      <button type="button" class="btn-pay-primary" id="btnExportGoogle">내보내기</button>
-    </div>
-    {% endif %}
+  {% set _show_payroll_actions = (export_allowed | default(false)) or ((payroll_snapshot_list | default([]))|length > 0) or finalize_snapshot_url %}
 
-    {% if (payroll_snapshot_list | default([]))|length > 0 %}
-    <div class="payroll-action-block" role="navigation" aria-label="저장된 급여 스냅샷">
-      <div class="pay-action-meta">
-        <span class="pay-badge pay-badge--slate">조회</span>
-        <div>
-          <div class="pay-action-heading">{% if snapshot_view_yyyymm %}다른 확정본{% else %}저장된 확정본{% endif %}</div>
-          <div class="pay-action-sub">월별 확정 시 보존해 둔 데이터입니다. 조회만 가능합니다.</div>
+  <section class="payroll-result-section">
+  <div class="payroll-top-split{% if not _show_payroll_actions %} payroll-top-split--single{% endif %}">
+    <div class="payroll-top-split__main">
+      <h2>급여 결과 (payroll_result)</h2>
+      <div class="payroll-table-toolbar">
+        <ul class="payroll-legend-chips" aria-label="셀 색 범례">
+          <li class="cell-paid_leave">연차(유급)</li>
+          <li class="cell-unpaid_leave">오프/무급</li>
+          <li class="cell-mixed_leave">유급+무급(같은 날)</li>
+          <li class="cell-absent">결근/이상</li>
+          <li class="text-non-half">소수 .0·.5 아님</li>
+          <li class="cell-over-8">8시간 초과</li>
+        </ul>
+        <div class="payroll-filters">
+          <span class="filter-label">표시</span>
+          <label><input type="radio" name="payrollFilter" value="전체보기" checked> 전체보기</label>
+          <label><input type="radio" name="payrollFilter" value="정규직"> 정규직</label>
+          <label><input type="radio" name="payrollFilter" value="상용직"> 상용직</label>
+          <label><input type="radio" name="payrollFilter" value="프리랜스"> 프리랜스</label>
+          <label>직원 <select id="payrollEmployeeFilter" aria-label="직원 필터">
+            <option value="">전체 직원</option>
+          </select></label>
         </div>
-      </div>
-      <div class="pay-action-controls">
-        <select id="payrollSnapshotPicker" aria-label="스냅샷 월 선택">
-          <option value="">월 선택…</option>
-          {% for s in payroll_snapshot_list %}
-          <option value="{{ s.yyyymm }}"{% if snapshot_view_yyyymm == s.yyyymm %} selected{% endif %}>{{ s.year }}년 {{ '%02d'|format(s.month) }}월 ({{ s.yyyymm }})</option>
-          {% endfor %}
-        </select>
-        <button type="button" class="btn-pay-secondary" id="btnOpenPayrollSnapshot">열기</button>
-        {% if snapshot_view_yyyymm %}
-        <a href="{{ url_for('payroll') }}" class="link-current-payroll">현재 작업으로 →</a>
+        {% if _editable %}
+        <div class="payroll-autofill">
+          <strong>빈칸 자동채우기</strong>
+          <label><input type="checkbox" id="autofillUseContract" checked> 계약 근무시간 적용</label>
+          <label>대상 <select id="autofillTarget">
+            <option value="">전체 일자</option>
+          </select></label>
+          <label>시간 <input type="number" id="autofillHours" value="8" min="0" max="24" step="0.5" style="width: 56px;"></label>
+          <button type="button" class="btn btn-autofill" id="btnAutofill" style="background: #059669; color: #fff; border: none; padding: 7px 14px; border-radius: 8px; font-weight: 600; cursor: pointer;">적용</button>
+          <span class="autofill-hint">계약 적용 시 직원별 소정근로시간으로 채웁니다. 적용 시 기본급~합계가 자동 재계산됩니다.</span>
+        </div>
         {% endif %}
       </div>
     </div>
-    {% endif %}
 
-    {% if finalize_snapshot_url %}
-    <div class="payroll-action-block payroll-action-block--archive" role="region" aria-label="월별 급여 확정 스냅샷">
-      <div class="pay-action-meta" style="flex-basis:100%;">
-        <span class="pay-badge pay-badge--violet">보존</span>
-        <div style="flex:1; min-width:0;">
-          <div class="pay-action-heading">월별 확정 (영구 보존)</div>
-          <div class="pay-action-sub">해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요.</div>
-          <p class="pay-archive-note">현재 공개 데이터(<code>published/</code>) 전체가 GCS <code>snapshots/payroll_YYYYMM/</code> 에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.</p>
-          <div class="pay-archive-row">
-            <label class="snapshot-month-label">급여 지급월
-              <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
-            </label>
-            <button type="button" class="btn-pay-archive" id="btnFinalizeSnapshot">스냅샷 저장</button>
-            <span id="snapshotFinalizeHint" class="snapshot-hint" aria-live="polite"></span>
+    {% if _show_payroll_actions %}
+    <aside class="payroll-top-split__aside">
+      <div class="payroll-actions-shell payroll-actions-shell--aside" aria-label="급여 작업 및 스냅샷">
+        {% if export_allowed | default(false) %}
+        <div class="payroll-action-block payroll-action-block--primary">
+          <div class="pay-action-meta">
+            <span class="pay-badge pay-badge--blue">연동</span>
+            <div>
+              <div class="pay-action-heading">구글 시트 내보내기</div>
+              <div class="pay-action-sub">편집한 표를 새 구글 스프레드시트 탭으로 반영합니다.</div>
+            </div>
+          </div>
+          <button type="button" class="btn-pay-primary" id="btnExportGoogle">내보내기</button>
+        </div>
+        {% endif %}
+
+        {% if (payroll_snapshot_list | default([]))|length > 0 %}
+        <div class="payroll-action-block" role="navigation" aria-label="저장된 급여 스냅샷">
+          <div class="pay-action-meta">
+            <span class="pay-badge pay-badge--slate">조회</span>
+            <div>
+              <div class="pay-action-heading">{% if snapshot_view_yyyymm %}다른 확정본{% else %}저장된 확정본{% endif %}</div>
+              <div class="pay-action-sub">월별 확정 시 보존해 둔 데이터입니다. 조회만 가능합니다.</div>
+            </div>
+          </div>
+          <div class="pay-action-controls">
+            <select id="payrollSnapshotPicker" aria-label="스냅샷 월 선택">
+              <option value="">월 선택…</option>
+              {% for s in payroll_snapshot_list %}
+              <option value="{{ s.yyyymm }}"{% if snapshot_view_yyyymm == s.yyyymm %} selected{% endif %}>{{ s.year }}년 {{ '%02d'|format(s.month) }}월 ({{ s.yyyymm }})</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="btn-pay-secondary" id="btnOpenPayrollSnapshot">열기</button>
+            {% if snapshot_view_yyyymm %}
+            <a href="{{ url_for('payroll') }}" class="link-current-payroll">현재 작업으로 →</a>
+            {% endif %}
           </div>
         </div>
+        {% endif %}
+
+        {% if finalize_snapshot_url %}
+        <div class="payroll-action-block payroll-action-block--archive" role="region" aria-label="월별 급여 확정 스냅샷">
+          <div class="pay-action-meta" style="flex-basis:100%;">
+            <span class="pay-badge pay-badge--violet">보존</span>
+            <div style="flex:1; min-width:0;">
+              <div class="pay-action-heading">월별 확정 (영구 보존)</div>
+              <div class="pay-action-sub">해당 급여월 산정·수정이 모두 끝난 뒤 실행하세요.</div>
+              <p class="pay-archive-note">현재 공개 데이터(<code>published/</code>) 전체가 GCS <code>snapshots/payroll_YYYYMM/</code> 에 복사되어 보존됩니다. 차월 작업은 관리자 업로드로 이어가면 됩니다.</p>
+              <div class="pay-archive-row">
+                <label class="snapshot-month-label">급여 지급월
+                  <input type="month" id="snapshotMonthInput" {% if default_snapshot_year and default_snapshot_month %}value="{{ '%04d-%02d' | format(default_snapshot_year, default_snapshot_month) }}"{% endif %} aria-label="급여 지급월">
+                </label>
+                <button type="button" class="btn-pay-archive" id="btnFinalizeSnapshot">스냅샷 저장</button>
+                <span id="snapshotFinalizeHint" class="snapshot-hint" aria-live="polite"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
       </div>
-    </div>
+    </aside>
     {% endif %}
   </div>
-  {% endif %}
 
   {% if export_allowed | default(false) %}
   <div class="modal-overlay" id="exportModal">
@@ -519,40 +617,6 @@
   </div>
   {% endif %}
 
-  <section>
-    <h2>급여 결과 (payroll_result)</h2>
-    <div class="payroll-table-toolbar">
-      <ul class="payroll-legend-chips" aria-label="셀 색 범례">
-        <li class="cell-paid_leave">연차(유급)</li>
-        <li class="cell-unpaid_leave">오프/무급</li>
-        <li class="cell-mixed_leave">유급+무급(같은 날)</li>
-        <li class="cell-absent">결근/이상</li>
-        <li class="text-non-half">소수 .0·.5 아님</li>
-        <li class="cell-over-8">8시간 초과</li>
-      </ul>
-      <div class="payroll-filters">
-        <span class="filter-label">표시</span>
-        <label><input type="radio" name="payrollFilter" value="전체보기" checked> 전체보기</label>
-        <label><input type="radio" name="payrollFilter" value="정규직"> 정규직</label>
-        <label><input type="radio" name="payrollFilter" value="상용직"> 상용직</label>
-        <label><input type="radio" name="payrollFilter" value="프리랜스"> 프리랜스</label>
-        <label>직원 <select id="payrollEmployeeFilter" aria-label="직원 필터">
-          <option value="">전체 직원</option>
-        </select></label>
-      </div>
-      {% if _editable %}
-      <div class="payroll-autofill">
-        <strong>빈칸 자동채우기</strong>
-        <label><input type="checkbox" id="autofillUseContract" checked> 계약 근무시간 적용</label>
-        <label>대상 <select id="autofillTarget">
-          <option value="">전체 일자</option>
-        </select></label>
-        <label>시간 <input type="number" id="autofillHours" value="8" min="0" max="24" step="0.5" style="width: 56px;"></label>
-        <button type="button" class="btn btn-autofill" id="btnAutofill" style="background: #059669; color: #fff; border: none; padding: 7px 14px; border-radius: 8px; font-weight: 600; cursor: pointer;">적용</button>
-        <span class="autofill-hint">계약 적용 시 직원별 소정근로시간으로 채웁니다. 적용 시 기본급~합계가 자동 재계산됩니다.</span>
-      </div>
-      {% endif %}
-    </div>
     <div class="table-wrap table-wrap-payroll">
       <div class="table-wrap-x">
       {% if use_payroll_table %}
