@@ -75,6 +75,12 @@ _KNOWN_KR_WEEKDAY_HOLIDAYS = [
     (2026, 3, 2),  # 2026 삼일절 대체공휴일 (평일 휴일)
 ]
 
+# 매년 동일 월·일 — holidays.SouthKorea에 없어도 평일이면 5/5(어린이날)와 동일 규칙 적용
+# (5, 1): 근로자의 날 — 법정 유급은 아니나 회사 정책상 평일 공휴일로 워킹·주휴 산정에 반영
+_RECURRING_KR_WEEKDAY_PUBLIC_HOLIDAYS = [
+    (5, 1),  # 근로자의 날
+]
+
 
 def get_weekday_public_holidays_kr(start_date: date, end_date: date) -> set[date]:
     """한국 공휴일 중 평일(월~금)만 반환. holidays 라이브러리 + 알려진 날짜 폴백."""
@@ -100,6 +106,16 @@ def get_weekday_public_holidays_kr(start_date: date, end_date: date) -> set[date
                 out.add(d)
         except (ValueError, IndexError):
             pass
+    # 3) 연간 고정일 — 라이브러리에 없는 날(예: 5/1 근로자의 날)도 평일이면 동일 처리
+    y0, y1 = start_date.year, end_date.year
+    for year in range(y0, y1 + 1):
+        for month, day in _RECURRING_KR_WEEKDAY_PUBLIC_HOLIDAYS:
+            try:
+                d = date(year, month, day)
+                if start_date <= d <= end_date and d.weekday() <= 4:
+                    out.add(d)
+            except ValueError:
+                pass
     return out
 
 
