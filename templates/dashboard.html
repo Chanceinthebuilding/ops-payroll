@@ -18,6 +18,21 @@
     .page { max-width: min(1320px, 96vw); margin: 0 auto; }
     h1 { margin: 2px 0 4px; font-size: 1.95rem; font-weight: 700; letter-spacing: -0.02em; }
     .sub { margin: 0 0 20px; color: #64748b; font-size: 0.92rem; }
+    .month-bar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin: 10px 0 16px; padding: 10px 14px;
+      background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.9);
+      border-radius: 12px; box-shadow: 0 4px 12px rgba(15,23,42,0.05);
+    }
+    .month-bar label { font-size: 0.82rem; font-weight: 600; color: #475569; white-space: nowrap; }
+    .month-bar select {
+      padding: 6px 10px; border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 0.88rem; cursor: pointer; background: #fff;
+    }
+    .month-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      font-size: 0.78rem; font-weight: 700; background: #dbeafe; color: #1d4ed8;
+    }
     .grid-kpi {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -188,8 +203,37 @@
   <div class="page">
     {% include '_nav.html' %}
     <h1>인건비 대시보드</h1>
+
+    {% if available_months %}
+    <div class="month-bar">
+      <label for="dashboard-month">조회 월</label>
+      <select id="dashboard-month">
+        <option value="">최신 데이터 (Published)</option>
+        {% for m in available_months %}
+        <option value="{{ m.year }}-{{ '%02d' % m.month }}"
+          {% if selected_month == m.yyyymm %}selected{% endif %}>
+          {{ m.year }}년 {{ m.month }}월 확정
+        </option>
+        {% endfor %}
+      </select>
+      {% if selected_month %}
+      <span class="month-badge">{{ selected_month[:4] }}년 {{ selected_month[4:6] }}월 확정 데이터</span>
+      {% endif %}
+    </div>
+    <script>
+    document.getElementById('dashboard-month').addEventListener('change', function() {
+      var v = this.value;
+      window.location.href = v ? '?month=' + v : '{{ url_for("dashboard") }}';
+    });
+    </script>
+    {% endif %}
+
     {% if dashboard_ready %}
+    {% if selected_month %}
+    <p class="sub">{{ selected_month[:4] }}년 {{ selected_month[4:6] }}월 확정 데이터 기준 · 집계 기간: <strong>{{ period_start }}</strong> ~ <strong>{{ period_end }}</strong></p>
+    {% else %}
     <p class="sub">공개 데이터 기준 집계 기간: <strong>{{ period_start }}</strong> ~ <strong>{{ period_end }}</strong></p>
+    {% endif %}
     {% if payroll_period_start and payroll_period_end %}
     <p class="sub" style="margin-top: -10px;">
       일자·근무시간 기반 차트와 근태 비용 순위는 <strong>급여 산정기간</strong>(<strong>{{ payroll_period_start }}</strong> ~ <strong>{{ payroll_period_end }}</strong>) 안의 출퇴근만 집계합니다.

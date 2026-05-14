@@ -133,29 +133,53 @@ def dashboard():
     if not _can_current_user("dashboard", "view"):
         flash("인건비 대시보드 조회 권한이 없습니다.", "error")
         return redirect(url_for("index"))
-    if not _published_exists():
-        return render_template("dashboard.html", dashboard_ready=False)
-    pmeta = _read_published_meta_dict() or {}
-    fm_meta = _read_fm_upload_meta_dict() or {}
-    token = f"{pmeta.get('published_at','')}|{fm_meta.get('uploaded_at','')}"
-    hit = _view_cache_get("dashboard", token)
-    if hit is not None:
-        return render_template("dashboard.html", **hit)
 
-    pre = _read_dashboard_cache_dict() or {}
+    # 월 파라미터 파싱: ?month=2026-04 → yyyymm="202604"
+    month_param = (request.args.get("month") or "").strip()
+    yyyymm: str | None = None
+    if month_param and len(month_param) == 7 and month_param[4] == "-":
+        candidate = month_param[:4] + month_param[5:]
+        if candidate.isdigit() and _snapshot_exists(candidate):
+            yyyymm = candidate
+
+    available_months = _list_payroll_snapshots_brief()
+
+    if not yyyymm and not _published_exists():
+        return render_template("dashboard.html", dashboard_ready=False, available_months=available_months, selected_month=None)
+
+    # 캐시 키 & 토큰
+    if yyyymm:
+        cache_key = f"dashboard:{yyyymm}"
+        token = f"snapshot:{yyyymm}"
+    else:
+        pmeta = _read_published_meta_dict() or {}
+        fm_meta = _read_fm_upload_meta_dict() or {}
+        token = f"{pmeta.get('published_at','')}|{fm_meta.get('uploaded_at','')}"
+        cache_key = "dashboard"
+
+    # 메모리 캐시
+    hit = _view_cache_get(cache_key, token)
+    if hit is not None:
+        return render_template("dashboard.html", available_months=available_months, selected_month=yyyymm, **hit)
+
+    # 디스크/GCS 캐시
+    pre = _read_dashboard_cache_dict(yyyymm) or {}
     pre_ctx = pre.get("ctx") if isinstance(pre, dict) else None
     if isinstance(pre_ctx, dict) and pre_ctx:
-        _view_cache_set("dashboard", token, pre_ctx)
-        return render_template("dashboard.html", **pre_ctx)
+        _view_cache_set(cache_key, token, pre_ctx)
+        return render_template("dashboard.html", available_months=available_months, selected_month=yyyymm, **pre_ctx)
 
+    # 캐시 미스 → 다운로드 후 계산
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        if not _download_published_to_dir(tmp_dir):
-            return render_template("dashboard.html", dashboard_ready=False)
+        ok = _download_snapshot_to_dir(yyyymm, tmp_dir) if yyyymm else _download_published_to_dir(tmp_dir)
+        if not ok:
+            return render_template("dashboard.html", dashboard_ready=False, available_months=available_months, selected_month=yyyymm)
         _attach_fm_roster_to_dir(tmp_dir)
         ctx = _build_dashboard_context(tmp_dir)
-        _view_cache_set("dashboard", token, ctx)
-        return render_template("dashboard.html", **ctx)
+        _save_dashboard_cache(ctx, source="dashboard_build", yyyymm=yyyymm)
+        _view_cache_set(cache_key, token, ctx)
+        return render_template("dashboard.html", available_months=available_months, selected_month=yyyymm, **ctx)
 
 
 @app.route("/commercialization")
@@ -871,6 +895,14 @@ def _dashboard_cache_blob_name() -> str:
     return f"metadata/{DASHBOARD_CACHE_FILENAME}"
 
 
+def _snapshot_dashboard_cache_local_path(yyyymm: str) -> Path:
+    return FM_ROSTER_LOCAL_DIR / f"dashboard_cache_{yyyymm}.json"
+
+
+def _snapshot_dashboard_cache_blob_name(yyyymm: str) -> str:
+    return f"metadata/dashboard_cache_{yyyymm}.json"
+
+
 def _permissions_blob_name() -> str:
     # 별도 폴더(access-control)로 분리 관리
     return f"access-control/{PERMISSIONS_FILENAME}"
@@ -1160,8 +1192,13 @@ def _read_overtime_status_meta_dict() -> dict | None:
     return None
 
 
-def _read_dashboard_cache_dict() -> dict | None:
-    p = DASHBOARD_CACHE_LOCAL_PATH
+def _read_dashboard_cache_dict(yyyymm: str | None = None) -> dict | None:
+    if yyyymm:
+        p = _snapshot_dashboard_cache_local_path(yyyymm)
+        blob_name = _snapshot_dashboard_cache_blob_name(yyyymm)
+    else:
+        p = DASHBOARD_CACHE_LOCAL_PATH
+        blob_name = _dashboard_cache_blob_name()
     if p.is_file():
         try:
             return json.loads(p.read_text(encoding="utf-8"))
@@ -1171,7 +1208,7 @@ def _read_dashboard_cache_dict() -> dict | None:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tf:
             tfp = Path(tf.name)
         try:
-            if _gcs_download_file(_dashboard_cache_blob_name(), tfp):
+            if _gcs_download_file(blob_name, tfp):
                 return json.loads(tfp.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
@@ -1206,7 +1243,7 @@ def _view_cache_clear(prefix: str | None = None):
             _VIEW_CACHE.pop(k, None)
 
 
-def _save_dashboard_cache(ctx: dict, source: str = "") -> None:
+def _save_dashboard_cache(ctx: dict, source: str = "", yyyymm: str | None = None) -> None:
     payload = {
         "generated_at": datetime.now(KST).isoformat(),
         "source": source,
@@ -1214,12 +1251,18 @@ def _save_dashboard_cache(ctx: dict, source: str = "") -> None:
         "ctx": ctx,
     }
     FM_ROSTER_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
-    DASHBOARD_CACHE_LOCAL_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    if yyyymm:
+        local_path = _snapshot_dashboard_cache_local_path(yyyymm)
+        blob_name = _snapshot_dashboard_cache_blob_name(yyyymm)
+    else:
+        local_path = DASHBOARD_CACHE_LOCAL_PATH
+        blob_name = _dashboard_cache_blob_name()
+    local_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     if gcs_enabled():
-        _gcs_upload_text(json.dumps(payload, ensure_ascii=False), _dashboard_cache_blob_name())
+        _gcs_upload_text(json.dumps(payload, ensure_ascii=False), blob_name)
 
 
-def _rebuild_dashboard_cache_from_dir(output_dir: Path, source: str = "") -> None:
+def _rebuild_dashboard_cache_from_dir(output_dir: Path, source: str = "", yyyymm: str | None = None) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         for name in PUBLISHED_FILES:
@@ -1228,7 +1271,7 @@ def _rebuild_dashboard_cache_from_dir(output_dir: Path, source: str = "") -> Non
                 shutil.copy2(src, tmp_dir / name)
         _attach_fm_roster_to_dir(tmp_dir)
         ctx = _build_dashboard_context(tmp_dir)
-        _save_dashboard_cache(ctx, source=source)
+        _save_dashboard_cache(ctx, source=source, yyyymm=yyyymm)
         _view_cache_clear("dashboard")
 
 
