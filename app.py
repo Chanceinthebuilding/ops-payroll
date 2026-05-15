@@ -229,12 +229,28 @@ def commercialization_dashboard():
     rows_fm = list(data.get("rows_fm", []))
     rows_log = list(data.get("rows_logistics", []))
     rows_order = list(data.get("rows_order_fm", []))
-    role_totals = _commercialization_role_totals_from_dashboard_cache()
-    _apply_commercialization_role_override(rows_fm, rows_log, rows_order, role_totals, target_ym="2026-04")
+    rows_packing = list(data.get("rows_packing", []))
+
+    # 202604 이후 각 확정 스냅샷별로 해당 월 데이터 override
+    _OVERRIDE_START = "202604"
+    for snap in _list_payroll_snapshots_brief():
+        yyyymm = snap["yyyymm"]
+        if yyyymm < _OVERRIDE_START:
+            continue
+        target_ym = f"{yyyymm[:4]}-{yyyymm[4:]}"
+        role_totals = _commercialization_role_totals_for_yyyymm(yyyymm)
+        _apply_commercialization_role_override(
+            rows_fm, rows_log, rows_order, role_totals,
+            target_ym=target_ym, rows_packing=rows_packing,
+        )
+
     _apply_unit_color_scale(rows_fm)
     _apply_unit_color_scale(rows_log)
     _apply_unit_color_scale(rows_order)
-    chart_ctx = _build_commercialization_unit_line_chart(rows_fm, rows_log, rows_order, y_min=0, y_max=6000)
+    _apply_unit_color_scale(rows_packing)
+    chart_ctx = _build_commercialization_unit_line_chart(
+        rows_fm, rows_log, rows_order, y_min=0, y_max=6000, rows_packing=rows_packing,
+    )
 
     return render_template(
         "commercialization.html",
@@ -245,6 +261,7 @@ def commercialization_dashboard():
         rows_fm=rows_fm,
         rows_logistics=rows_log,
         rows_order_fm=rows_order,
+        rows_packing=rows_packing,
         chart_ctx=chart_ctx,
         fmt_pct=fmt_pct,
     )
@@ -259,39 +276,10 @@ def _gcs_bucket_name() -> str:
     return os.environ.get("GCS_BUCKET", "").strip()
 
 
-def _commercialization_role_totals_from_dashboard_cache() -> dict[str, int]:
-    rows: list[dict] = []
-
-    payload = _read_dashboard_cache_dict() or {}
-    ctx = payload.get("ctx") if isinstance(payload, dict) else {}
-    cached_rows = ctx.get("fm_role_rows") if isinstance(ctx, dict) else []
-    if isinstance(cached_rows, list) and cached_rows:
-        rows = cached_rows
-
-    # 캐시가 비어 있으면 published 데이터를 읽어 즉시 집계(최신 업로드 직후 대비).
-    if not rows and _published_exists():
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                tmp_dir = Path(tmp)
-                if _download_published_to_dir(tmp_dir):
-                    _attach_fm_roster_to_dir(tmp_dir)
-                    live_ctx = _build_dashboard_context(tmp_dir)
-                    live_rows = live_ctx.get("fm_role_rows") if isinstance(live_ctx, dict) else []
-                    if isinstance(live_rows, list):
-                        rows = live_rows
-        except Exception:
-            rows = []
-
-    if not isinstance(rows, list):
-        rows = []
-
+def _aggregate_fm_role_totals(rows: list[dict]) -> dict[str, int]:
     def _norm(s: str) -> str:
         return str(s or "").strip().replace(" ", "")
-
-    tagging = 0
-    cleaning = 0
-    shooting = 0
-    logistics = 0
+    tagging = cleaning = shooting = logistics = packing = 0
     for r in rows:
         role = _norm(r.get("role"))
         try:
@@ -306,13 +294,62 @@ def _commercialization_role_totals_from_dashboard_cache() -> dict[str, int]:
             shooting += pay
         if "물류" in role:
             logistics += pay
-
+        if "포장" in role:
+            packing += pay
     return {
         "tagging_krw": tagging,
         "cleaning_krw": cleaning,
         "shooting_krw": shooting,
         "logistics_krw": logistics,
+        "packing_krw": packing,
     }
+
+
+def _commercialization_role_totals_for_yyyymm(yyyymm: str) -> dict[str, int]:
+    """특정 확정월 스냅샷에서 역할별 인건비 합산 (캐시 우선)."""
+    rows: list[dict] = []
+    pre = _read_dashboard_cache_dict(yyyymm)
+    if pre:
+        ctx = pre.get("ctx") if isinstance(pre, dict) else {}
+        cached_rows = ctx.get("fm_role_rows") if isinstance(ctx, dict) else []
+        if isinstance(cached_rows, list) and cached_rows:
+            rows = cached_rows
+    if not rows and _snapshot_exists(yyyymm):
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_dir = Path(tmp)
+                if _download_snapshot_to_dir(yyyymm, tmp_dir):
+                    _attach_fm_roster_to_dir(tmp_dir)
+                    live_ctx = _build_dashboard_context(tmp_dir)
+                    live_rows = live_ctx.get("fm_role_rows") if isinstance(live_ctx, dict) else []
+                    if isinstance(live_rows, list):
+                        rows = live_rows
+        except Exception:
+            logger.exception("role totals for snapshot %s", yyyymm)
+    return _aggregate_fm_role_totals(rows if isinstance(rows, list) else [])
+
+
+def _commercialization_role_totals_from_dashboard_cache() -> dict[str, int]:
+    """최신 published 데이터 기준 역할별 인건비 합산 (하위호환용)."""
+    rows: list[dict] = []
+    payload = _read_dashboard_cache_dict() or {}
+    ctx = payload.get("ctx") if isinstance(payload, dict) else {}
+    cached_rows = ctx.get("fm_role_rows") if isinstance(ctx, dict) else []
+    if isinstance(cached_rows, list) and cached_rows:
+        rows = cached_rows
+    if not rows and _published_exists():
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_dir = Path(tmp)
+                if _download_published_to_dir(tmp_dir):
+                    _attach_fm_roster_to_dir(tmp_dir)
+                    live_ctx = _build_dashboard_context(tmp_dir)
+                    live_rows = live_ctx.get("fm_role_rows") if isinstance(live_ctx, dict) else []
+                    if isinstance(live_rows, list):
+                        rows = live_rows
+        except Exception:
+            rows = []
+    return _aggregate_fm_role_totals(rows if isinstance(rows, list) else [])
 
 
 def _recalculate_cost_change_fields(rows: list[dict]) -> None:
@@ -393,12 +430,14 @@ def _apply_commercialization_role_override(
     target_ym: str,
     tax_apply_from_ym: str = "2026-04",
     tax_multiplier: float = 0.9,
+    rows_packing: list[dict] | None = None,
 ) -> None:
     base_fm = int(role_totals.get("tagging_krw", 0)) + int(role_totals.get("cleaning_krw", 0)) + int(
         role_totals.get("shooting_krw", 0)
     )
     logistics = int(role_totals.get("logistics_krw", 0))
-    if base_fm <= 0 and logistics <= 0:
+    packing = int(role_totals.get("packing_krw", 0))
+    if base_fm <= 0 and logistics <= 0 and packing <= 0:
         return
 
     def _ensure_row(rows: list[dict]) -> dict:
@@ -424,6 +463,7 @@ def _apply_commercialization_role_override(
     if target_ym >= tax_apply_from_ym:
         base_fm = int(round(base_fm * tax_multiplier))
         logistics = int(round(logistics * tax_multiplier))
+        packing = int(round(packing * tax_multiplier))
 
     row_fm["cost"] = base_fm
     cnt = int(row_fm.get("cnt") or 0)
@@ -443,6 +483,14 @@ def _apply_commercialization_role_override(
     row_order["unit"] = int(round(logistics / cnt)) if cnt > 0 else None
     row_order["remark"] = (str(row_order.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
 
+    if rows_packing is not None:
+        row_pack = _ensure_row(rows_packing)
+        row_pack["cost"] = packing
+        cnt = int(row_pack.get("cnt") or 0)
+        row_pack["unit"] = int(round(packing / cnt)) if cnt > 0 else None
+        row_pack["remark"] = (str(row_pack.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
+        _recalculate_cost_change_fields(rows_packing)
+
     _recalculate_cost_change_fields(rows_fm)
     _recalculate_cost_change_fields(rows_logistics)
     _recalculate_cost_change_fields(rows_order_fm)
@@ -455,8 +503,10 @@ def _build_commercialization_unit_line_chart(
     *,
     y_min: int,
     y_max: int,
+    rows_packing: list[dict] | None = None,
 ) -> dict:
-    labels = sorted({str(r.get("ym")) for r in (rows_fm + rows_logistics + rows_order_fm) if r.get("ym")})
+    all_rows = rows_fm + rows_logistics + rows_order_fm + (rows_packing or [])
+    labels = sorted({str(r.get("ym")) for r in all_rows if r.get("ym")})
     width = 1380
     height = 340
     pad_l, pad_r, pad_t, pad_b = 70, 26, 20, 62
@@ -521,6 +571,7 @@ def _build_commercialization_unit_line_chart(
         _series(rows_fm, "상품화 FM", "#2563eb"),
         _series(rows_logistics, "상품화+물류 FM", "#16a34a"),
         _series(rows_order_fm, "주문 FM", "#7c3aed"),
+        _series(rows_packing or [], "포장 FM", "#ea580c"),
     ]
     for s in series_rows:
         key = s["key"]
