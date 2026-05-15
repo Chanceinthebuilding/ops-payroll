@@ -195,8 +195,7 @@
       <div class="chart-legend">
         <span><i class="chart-dot" style="background:#2563eb;"></i>상품화 FM</span>
         <span><i class="chart-dot" style="background:#16a34a;"></i>상품화+물류 FM</span>
-        <span><i class="chart-dot" style="background:#7c3aed;"></i>주문 FM</span>
-        <span><i class="chart-dot" style="background:#ea580c;"></i>포장 FM</span>
+        <span><i class="chart-dot" style="background:#7c3aed;"></i>포장 FM</span>
       </div>
       <div class="chart-wrap" id="lineChartWrap">
         <svg class="chart-svg" viewBox="0 0 {{ chart_ctx.width }} {{ chart_ctx.height }}" role="img" aria-label="월별 인건비 꺾은선 그래프">
@@ -234,7 +233,7 @@
       </div>
     </section>
 
-    <div class="triple" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+    <div class="triple">
       <section class="panel">
         <h2>상품화 FM 인건비</h2>
         <p class="cap">(태깅 + 클리닝 + 촬영) 인건비 ÷ 상품화 개수</p>
@@ -302,7 +301,7 @@
       </section>
 
       <section class="panel">
-        <h2>주문 FM 인건비</h2>
+        <h2>포장 FM 인건비</h2>
         <table>
           <thead>
             <tr>
@@ -318,38 +317,6 @@
           </thead>
           <tbody>
             {% for r in rows_order_fm %}
-            <tr>
-              <td>{{ r.ym }}</td>
-              <td class="num">{{ "{:,}".format(r.cnt) }}</td>
-              <td class="num">{{ fmt_pct(r.chg_cnt) }}</td>
-              <td class="num">{{ "{:,}".format(r.cost) }}</td>
-              <td class="num">{{ fmt_pct(r.chg_cost) }}</td>
-              <td class="num hl" style="background: {{ r.unit_bg or '#ffffff' }};">{% if r.unit is not none %}{{ "{:,}".format(r.unit) }}{% else %}—{% endif %}</td>
-              <td class="num">{{ fmt_pct(r.chg_unit) }}</td>
-              <td class="remark">{{ r.remark }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </section>
-      <section class="panel">
-        <h2>포장 FM 인건비</h2>
-        <p class="cap">(포장 + 포장(프리랜스)) 인건비 ÷ 주문상품 건수</p>
-        <table>
-          <thead>
-            <tr>
-              <th>연월</th>
-              <th class="num">주문상품 건수</th>
-              <th class="num">chg</th>
-              <th class="num">FM인건비(원)</th>
-              <th class="num">chg</th>
-              <th class="num">주문당<br>인건비(원)</th>
-              <th class="num">chg</th>
-              <th>비고</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in rows_packing %}
             <tr>
               <td>{{ r.ym }}</td>
               <td class="num">{{ "{:,}".format(r.cnt) }}</td>

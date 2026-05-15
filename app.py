@@ -229,7 +229,6 @@ def commercialization_dashboard():
     rows_fm = list(data.get("rows_fm", []))
     rows_log = list(data.get("rows_logistics", []))
     rows_order = list(data.get("rows_order_fm", []))
-    rows_packing = list(data.get("rows_packing", []))
 
     # 202604 이후 각 확정 스냅샷별로 해당 월 데이터 override
     _OVERRIDE_START = "202604"
@@ -239,18 +238,12 @@ def commercialization_dashboard():
             continue
         target_ym = f"{yyyymm[:4]}-{yyyymm[4:]}"
         role_totals = _commercialization_role_totals_for_yyyymm(yyyymm)
-        _apply_commercialization_role_override(
-            rows_fm, rows_log, rows_order, role_totals,
-            target_ym=target_ym, rows_packing=rows_packing,
-        )
+        _apply_commercialization_role_override(rows_fm, rows_log, rows_order, role_totals, target_ym=target_ym)
 
     _apply_unit_color_scale(rows_fm)
     _apply_unit_color_scale(rows_log)
     _apply_unit_color_scale(rows_order)
-    _apply_unit_color_scale(rows_packing)
-    chart_ctx = _build_commercialization_unit_line_chart(
-        rows_fm, rows_log, rows_order, y_min=0, y_max=6000, rows_packing=rows_packing,
-    )
+    chart_ctx = _build_commercialization_unit_line_chart(rows_fm, rows_log, rows_order, y_min=0, y_max=6000)
 
     return render_template(
         "commercialization.html",
@@ -261,7 +254,6 @@ def commercialization_dashboard():
         rows_fm=rows_fm,
         rows_logistics=rows_log,
         rows_order_fm=rows_order,
-        rows_packing=rows_packing,
         chart_ctx=chart_ctx,
         fmt_pct=fmt_pct,
     )
@@ -430,7 +422,6 @@ def _apply_commercialization_role_override(
     target_ym: str,
     tax_apply_from_ym: str = "2026-04",
     tax_multiplier: float = 0.9,
-    rows_packing: list[dict] | None = None,
 ) -> None:
     base_fm = int(role_totals.get("tagging_krw", 0)) + int(role_totals.get("cleaning_krw", 0)) + int(
         role_totals.get("shooting_krw", 0)
@@ -478,18 +469,10 @@ def _apply_commercialization_role_override(
     row_log["remark"] = (str(row_log.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
 
     row_order = _ensure_row(rows_order_fm)
-    row_order["cost"] = logistics
+    row_order["cost"] = packing
     cnt = int(row_order.get("cnt") or 0)
-    row_order["unit"] = int(round(logistics / cnt)) if cnt > 0 else None
+    row_order["unit"] = int(round(packing / cnt)) if cnt > 0 else None
     row_order["remark"] = (str(row_order.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
-
-    if rows_packing is not None:
-        row_pack = _ensure_row(rows_packing)
-        row_pack["cost"] = packing
-        cnt = int(row_pack.get("cnt") or 0)
-        row_pack["unit"] = int(round(packing / cnt)) if cnt > 0 else None
-        row_pack["remark"] = (str(row_pack.get("remark") or "") + " | 역할별 합계 반영").strip(" |")
-        _recalculate_cost_change_fields(rows_packing)
 
     _recalculate_cost_change_fields(rows_fm)
     _recalculate_cost_change_fields(rows_logistics)
@@ -503,10 +486,8 @@ def _build_commercialization_unit_line_chart(
     *,
     y_min: int,
     y_max: int,
-    rows_packing: list[dict] | None = None,
 ) -> dict:
-    all_rows = rows_fm + rows_logistics + rows_order_fm + (rows_packing or [])
-    labels = sorted({str(r.get("ym")) for r in all_rows if r.get("ym")})
+    labels = sorted({str(r.get("ym")) for r in (rows_fm + rows_logistics + rows_order_fm) if r.get("ym")})
     width = 1380
     height = 340
     pad_l, pad_r, pad_t, pad_b = 70, 26, 20, 62
@@ -570,8 +551,7 @@ def _build_commercialization_unit_line_chart(
     series_rows = [
         _series(rows_fm, "상품화 FM", "#2563eb"),
         _series(rows_logistics, "상품화+물류 FM", "#16a34a"),
-        _series(rows_order_fm, "주문 FM", "#7c3aed"),
-        _series(rows_packing or [], "포장 FM", "#ea580c"),
+        _series(rows_order_fm, "포장 FM", "#7c3aed"),
     ]
     for s in series_rows:
         key = s["key"]

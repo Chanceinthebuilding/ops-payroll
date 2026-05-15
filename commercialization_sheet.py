@@ -136,10 +136,8 @@ def fetch_dashboard_rows(start: str, end: str) -> tuple[dict[str, Any], str | No
     rows_fm = _filter_range(_parse_block(values, 0), start, end)
     rows_log = _filter_range(_parse_block(values, 9), start, end)
     rows_order = _filter_range(_parse_block(values, 18), start, end)
-    rows_packing = _filter_range(_parse_block(values, 27), start, end)
     return {
         "rows_fm": rows_fm,
         "rows_logistics": rows_log,
         "rows_order_fm": rows_order,
-        "rows_packing": rows_packing,
     }, None
