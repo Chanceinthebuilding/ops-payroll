@@ -232,13 +232,29 @@ def commercialization_dashboard():
 
     # 202604 이후 각 확정 스냅샷별로 해당 월 데이터 override
     _OVERRIDE_START = "202604"
+    snapped_yms: set[str] = set()
     for snap in _list_payroll_snapshots_brief():
         yyyymm = snap["yyyymm"]
         if yyyymm < _OVERRIDE_START:
             continue
         target_ym = f"{yyyymm[:4]}-{yyyymm[4:]}"
+        snapped_yms.add(target_ym)
         role_totals = _commercialization_role_totals_for_yyyymm(yyyymm)
         _apply_commercialization_role_override(rows_fm, rows_log, rows_order, role_totals, target_ym=target_ym)
+
+    # 확정(스냅샷) 전 published 상태인 최신 월도 override 적용
+    if _published_exists():
+        all_yms = sorted(
+            {str(r["ym"]) for r in (rows_fm + rows_log + rows_order)
+             if str(r.get("ym", "")) >= "2026-04" and int(r.get("cnt") or 0) > 0},
+            reverse=True,
+        )
+        for ym in all_yms:
+            if ym not in snapped_yms:
+                pub_totals = _commercialization_role_totals_from_dashboard_cache()
+                if any(v > 0 for v in pub_totals.values()):
+                    _apply_commercialization_role_override(rows_fm, rows_log, rows_order, pub_totals, target_ym=ym)
+                break
 
     _apply_unit_color_scale(rows_fm)
     _apply_unit_color_scale(rows_log)
