@@ -196,6 +196,8 @@ def parse_break_minutes(val) -> int:
 # 예: 09-13(4h)→4h, 09-14(5h)→4h, 09-16(7h)→6h, 11-18(7h)→6h, 09-18(9h)→8h
 BREAK_THRESHOLD_HOURS = 5
 BREAK_MINUTES_WHEN_APPLIED = 60
+EVENING_BREAK_THRESHOLD = time(18, 30)  # 이 시각 초과 퇴근 시 저녁 휴식 추가
+EVENING_BREAK_MINUTES = 30
 
 
 def compute_work_and_break(
@@ -252,6 +254,8 @@ def build_segments(df: pd.DataFrame) -> pd.DataFrame:
             end += timedelta(days=1)
 
         break_mins = get_break_minutes_for_employee(emp, contract_types, employee_contracts)
+        if end.time() > EVENING_BREAK_THRESHOLD:
+            break_mins += EVENING_BREAK_MINUTES
         work_min, break_min = compute_work_and_break(start, end, break_minutes_when_applied=break_mins)
 
         rows.append({
