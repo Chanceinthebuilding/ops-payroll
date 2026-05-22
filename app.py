@@ -1876,6 +1876,52 @@ def _load_fm_roster_pairs(path: Path):
     return pairs
 
 
+def _work_by_date_from_payroll(payroll: "pd.DataFrame", period_start, period_end) -> "dict[str, float]":
+    """payroll_result.csv 날짜 컬럼(M/D)으로 일자별 인건비를 계산한다 (수동 수정 반영)."""
+    import re
+    _SKIP = {
+        "base_pay", "overtime_pay", "overtime_hours", "weekly_allowance_pay",
+        "weekly_allowance_hours", "unpaid_hours", "total_pay",
+        "employee_id", "employee_name", "first_attendance_date",
+    }
+    result: dict[str, float] = {}
+    for col in payroll.columns:
+        s = str(col).replace("\r\n", "\n").replace("\r", "\n").split("\n")[0].strip()
+        if col in _SKIP or s.startswith("주휴") or "주휴용" in s:
+            continue
+        m = re.match(r"^(\d{1,2})/(\d{1,2})$", s)
+        if not m:
+            continue
+        mo, day = int(m.group(1)), int(m.group(2))
+        date_key: str | None = None
+        from datetime import date as _date
+        for year in sorted({period_start.year, period_end.year}):
+            try:
+                d = _date(year, mo, day)
+                if period_start <= d <= period_end:
+                    date_key = d.isoformat()
+                    break
+            except ValueError:
+                pass
+        if not date_key:
+            continue
+        col_cost = 0.0
+        for _, row in payroll.iterrows():
+            try:
+                h = float(row[col])
+                if h != h:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            mins = h * 60
+            base_min = min(mins, _RECALC_DAILY_CAP_MIN)
+            ot_min = max(mins - _RECALC_DAILY_CAP_MIN, 0)
+            col_cost += base_min / 60 * _RECALC_HOURLY + ot_min / 60 * _RECALC_HOURLY * _RECALC_OT_MULT
+        if col_cost > 0:
+            result[date_key] = result.get(date_key, 0.0) + col_cost
+    return result
+
+
 def _build_dashboard_context(output_dir: Path):
     import pandas as pd
 
@@ -1946,14 +1992,24 @@ def _build_dashboard_context(output_dir: Path):
     total_work_minutes = int(round(daily.get("net_minutes", pd.Series(dtype=float)).fillna(0).astype(float).sum()))
     total_work_hours = round(total_work_minutes / 60, 1)
 
-    daily_cost = (
-        daily.groupby("date_key", as_index=False)["daily_cost"]
-        .sum()
-        .sort_values("date_key")
-    )
-    work_by_date: dict[str, float] = {
-        str(r["date_key"]): float(r["daily_cost"]) for _, r in daily_cost.iterrows()
-    }
+    # payroll_result.csv 날짜 컬럼 기반 계산 (수동 수정 반영). 실패 시 daily_summary 기반으로 fallback.
+    work_by_date: dict[str, float] = {}
+    try:
+        from payroll_calculator import _infer_payroll_period
+        _ps, _pe = _infer_payroll_period(daily)
+        work_by_date = _work_by_date_from_payroll(payroll, _ps, _pe)
+    except Exception:
+        logger.exception("dashboard: payroll_result 기반 일자별 인건비 산출 실패")
+
+    if not work_by_date:
+        _daily_cost_df = (
+            daily.groupby("date_key", as_index=False)["daily_cost"]
+            .sum()
+            .sort_values("date_key")
+        )
+        work_by_date = {
+            str(r["date_key"]): float(r["daily_cost"]) for _, r in _daily_cost_df.iterrows()
+        }
 
     # 주휴수당: weekly_allowance_result → 주휴일(일요일) 행으로 합산 (급여 산정기간 내 일요일만)
     wa_by_sunday: dict[str, float] = {}
