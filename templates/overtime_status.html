@@ -54,6 +54,26 @@
       min-width: 1080px;
     }
     th, td { padding: 4px 5px; border-right: 1px solid #b8c2d4; border-bottom: 1px solid #b8c2d4; text-align: center; }
+    /* Row Hover: 셀에 마우스를 올리면 해당 행 겉테두리만 (셀 색 유지) */
+    table tbody tr td { transition: box-shadow 0.2s ease; }
+    table tbody tr:hover td {
+      position: relative;
+      z-index: 1;
+      border-left: none;
+      border-right: none;
+    }
+    table tbody tr:hover td:first-child:last-child {
+      box-shadow: inset 0 0 0 3px #e81abb;
+    }
+    table tbody tr:hover td:first-child:not(:last-child) {
+      box-shadow: inset 3px 0 0 0 #e81abb, inset 0 3px 0 0 #e81abb, inset 0 -3px 0 0 #e81abb;
+    }
+    table tbody tr:hover td:last-child:not(:first-child) {
+      box-shadow: inset -3px 0 0 0 #e81abb, inset 0 3px 0 0 #e81abb, inset 0 -3px 0 0 #e81abb;
+    }
+    table tbody tr:hover td:not(:first-child):not(:last-child) {
+      box-shadow: inset 0 3px 0 0 #e81abb, inset 0 -3px 0 0 #e81abb;
+    }
     th {
       color: #334155;
       font-size: 0.7rem;
