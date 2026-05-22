@@ -162,9 +162,14 @@ def dashboard():
     if hit is not None:
         return render_template("dashboard.html", available_months=available_months, selected_month=yyyymm, **hit)
 
-    # 디스크/GCS 캐시
+    # 디스크/GCS 캐시 — published_at 검증 후 사용
     pre = _read_dashboard_cache_dict(yyyymm) or {}
     pre_ctx = pre.get("ctx") if isinstance(pre, dict) else None
+    if isinstance(pre_ctx, dict) and pre_ctx:
+        cache_pa = pre.get("published_at", "")
+        current_pa = pmeta.get("published_at", "") if not yyyymm else ""
+        if current_pa and cache_pa != current_pa:
+            pre_ctx = None  # published_at 불일치 → 캐시 무효화
     if isinstance(pre_ctx, dict) and pre_ctx:
         _view_cache_set(cache_key, token, pre_ctx)
         return render_template("dashboard.html", available_months=available_months, selected_month=yyyymm, **pre_ctx)
