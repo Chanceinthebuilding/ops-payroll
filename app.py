@@ -1927,6 +1927,61 @@ def _work_by_date_from_payroll(payroll: "pd.DataFrame", period_start, period_end
     return result
 
 
+def _wa_by_sunday_from_payroll(payroll: "pd.DataFrame", wdf: "pd.DataFrame", period_start, period_end) -> "dict[str, float]":
+    """payroll_result.csv 주휴N 컬럼으로 일요일별 주휴수당을 계산한다 (수동 수정 반영)."""
+    import re
+    from payroll_calculator import HOURLY_WAGE, _week_sunday
+
+    # weekly_allowance_result의 week_start 순서 목록
+    week_starts: list[str] = []
+    if not wdf.empty and "week_start" in wdf.columns:
+        seen: set[str] = set()
+        for ws in wdf["week_start"]:
+            ws_str = str(ws).strip()[:10]
+            if ws_str and ws_str not in seen:
+                seen.add(ws_str)
+                week_starts.append(ws_str)
+
+    if not week_starts:
+        return {}
+
+    # 주휴N 컬럼 추출(주휴용 제외), 숫자 순 정렬
+    wa_cols: list[tuple[int, object]] = []
+    for col in payroll.columns:
+        s = str(col).strip()
+        if "주휴용" in s:
+            continue
+        m = re.match(r"^주휴(\d+)$", s)
+        if m:
+            wa_cols.append((int(m.group(1)), col))
+    wa_cols.sort(key=lambda x: x[0])
+
+    result: dict[str, float] = {}
+    for idx, (_, col) in enumerate(wa_cols):
+        if idx >= len(week_starts):
+            break
+        try:
+            sun = _week_sunday(week_starts[idx])
+        except Exception:
+            continue
+        if not (period_start <= sun <= period_end):
+            continue
+        sk = sun.isoformat() if hasattr(sun, "isoformat") else str(sun)
+        total_hours = 0.0
+        for _, row in payroll.iterrows():
+            try:
+                h = float(row[col])
+                if h != h:
+                    continue
+                total_hours += h
+            except (TypeError, ValueError):
+                continue
+        if total_hours > 0:
+            amt = round(round(total_hours, 1) * HOURLY_WAGE, 0)
+            result[sk] = result.get(sk, 0.0) + amt
+    return result
+
+
 def _build_dashboard_context(output_dir: Path):
     import pandas as pd
 
@@ -2045,6 +2100,16 @@ def _build_dashboard_context(output_dir: Path):
                 wa_by_sunday = tmp
     except Exception:
         logger.exception("dashboard: 주휴 일자별 집계 생략")
+
+    # payroll_result.csv 주휴N 컬럼 기반 재계산 (수동 수정 반영). 실패 시 weekly_allowance_result 기반 유지.
+    try:
+        from payroll_calculator import _infer_payroll_period
+        _ps_wa, _pe_wa = _infer_payroll_period(daily)
+        pa_wa = _wa_by_sunday_from_payroll(payroll, wdf_for_order, _ps_wa, _pe_wa)
+        if pa_wa:
+            wa_by_sunday = pa_wa
+    except Exception:
+        logger.exception("dashboard: payroll 기반 주휴수당 재계산 실패, weekly_allowance_result 기반 유지")
 
     def _dash_fmt_md(dk: str) -> str:
         d = pd.to_datetime(dk)
