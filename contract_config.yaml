@@ -62,6 +62,14 @@ employee_contracts:
   # "F102": freelancer_9to5
   # "104": freelancer_9to6_MTW
 
+# 직원별 출근시간 정규화 override: start~end 구간이면 normalized 시각으로 고정
+# (전체 정규화 이후 적용 — 계약상 출근시간이 전체 규칙과 다른 인원에 사용)
+employee_checkin_normalize:
+  "52":          # 류경희: 10시 출근 계약, 09:00~10:00 사이 출근은 10:00으로
+    start: "09:00"
+    end: "10:00"
+    normalized: "10:00"
+
 # 시프티 출퇴근 엑셀에 없는 인원: 엑셀에 찍힌 날짜 범위(min~max) 안에서
 # 월~금이면서 한국 평일 공휴일이 아닌 날에만 근무 행을 자동 생성 (주말·평일 공휴일 제외).
 # 이미 해당 일자에 행이 있으면 덮어쓰지 않음(시프티·휴가 등과 병합 가능).

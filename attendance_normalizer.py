@@ -221,6 +221,7 @@ def compute_work_and_break(
 # =========================
 def build_segments(df: pd.DataFrame) -> pd.DataFrame:
     contract_types, employee_contracts = load_contract_config()
+    emp_checkin_normalize = load_employee_checkin_normalize()
 
     rows = []
     df2 = df.copy()
@@ -243,6 +244,12 @@ def build_segments(df: pd.DataFrame) -> pd.DataFrame:
         start = combine_dt(r["날짜"], r["출근시간"])
         start = normalize_checkin(start)
         start = normalize_to_n_hour(start)
+        # 직원별 출근 정규화 override (전체 정규화 이후 적용)
+        if start is not None and emp in emp_checkin_normalize:
+            spec = emp_checkin_normalize[emp]
+            t = start.astimezone(KST).time() if start.tzinfo else start.time()
+            if spec["start"] <= t <= spec["end"]:
+                start = datetime.combine(start.date(), spec["normalized"], tzinfo=KST)
         end = combine_dt(r["날짜"], r["퇴근시간"])
         end = normalize_checkout(end)
         end = normalize_to_n_hour(end)
@@ -287,6 +294,26 @@ def load_contract_config() -> tuple[dict, dict]:
     types = cfg.get("contract_types", {"standard_9to6": {"scheduled_minutes": 480, "break_minutes": 60, "weekdays": [0, 1, 2, 3, 4]}})
     employees = cfg.get("employee_contracts", {"default": "standard_9to6"})
     return types, employees
+
+
+def load_employee_checkin_normalize() -> dict[str, dict]:
+    """employee_checkin_normalize 섹션 반환. {사번: {start, end, normalized}} 형태."""
+    if not CONTRACT_CONFIG_PATH.exists():
+        return {}
+    with open(CONTRACT_CONFIG_PATH, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    raw = cfg.get("employee_checkin_normalize", {})
+    result: dict[str, dict] = {}
+    for emp_key, spec in (raw or {}).items():
+        try:
+            result[str(emp_key).strip()] = {
+                "start": time.fromisoformat(str(spec["start"])),
+                "end": time.fromisoformat(str(spec["end"])),
+                "normalized": time.fromisoformat(str(spec["normalized"])),
+            }
+        except Exception:
+            pass
+    return result
 
 
 def load_no_shifty_attendance() -> dict:
