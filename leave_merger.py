@@ -527,6 +527,15 @@ def apply_leave_to_daily(daily_path: Path, leave_path: Path | None, output_dir: 
     # 평일 공휴일: 유급휴일로 계약별 scheduled_minutes 지급. 당일 근무한 경우 휴일 지급 + 실제 근무(야근 반영)
     date_min = _to_date(daily["date"].min())
     date_max = _to_date(daily["date"].max())
+    # 급여산정 시작일이 date_min보다 이를 수 있음 (예: 기간 첫날이 공휴일이라 실근무 기록 없는 경우)
+    # → payroll_start를 date_min 하한선으로 사용해 기간 첫날 공휴일 누락 방지
+    try:
+        from payroll_calculator import _infer_payroll_period
+        payroll_start, _ = _infer_payroll_period(daily)
+        if payroll_start < date_min:
+            date_min = payroll_start
+    except Exception:
+        pass
     holiday_dates = get_weekday_public_holidays_kr(date_min, date_max)
     if holiday_dates:
         daily["_dkey"] = daily["date"].apply(_date_to_dkey)
