@@ -1,6 +1,8 @@
 # 인증 정보
 shiftee_credentials.py
 .env
+.env.*
+!env.example
 
 # Playwright 세션
 shiftee_session.json
