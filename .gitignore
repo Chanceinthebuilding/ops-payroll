@@ -10,6 +10,9 @@ shiftee_session.json
 # 디버그 스크린샷
 debug_*.png
 
+# 메일 발송 로그 (수신자·문서명 등 개인정보 포함)
+email_send_log_*.csv
+
 # 파이프라인 입출력
 input/
 output/

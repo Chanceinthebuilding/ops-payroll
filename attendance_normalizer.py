@@ -93,20 +93,28 @@ def normalize_checkin(dt: datetime | None) -> datetime | None:
 
 
 # =========================
-# 퇴근시간 정규화: 17:45~18:15 → 18:00 (아래 n시 정규화에 포함)
+# 퇴근시간 정규화: 17:45~18:28 → 18:00, 18:29~18:31 → 18:30
+# (18:32 이후는 실제 야근으로 보고 그대로 둠. 아래 n시 정규화에 포함)
 # =========================
 CHECKOUT_NORMALIZE_START = time(17, 45)
-CHECKOUT_NORMALIZE_END = time(18, 15)
+CHECKOUT_NORMALIZE_END = time(18, 28)
 CHECKOUT_NORMALIZED = time(18, 0)
+
+# 18:30 전후로 늦게 찍은 건: 18:30으로 통일 (저녁휴게 기준 이하라 30분 추가차감 없음)
+CHECKOUT_HALF_START = time(18, 29)
+CHECKOUT_HALF_END = time(18, 31)
+CHECKOUT_HALF_NORMALIZED = time(18, 30)
 
 
 def normalize_checkout(dt: datetime | None) -> datetime | None:
-    """퇴근시간이 17:45~18:15 구간이면 해당일 18:00으로 통일."""
+    """퇴근시간 정규화: 17:45~18:28 → 18:00, 18:29~18:31 → 18:30."""
     if dt is None:
         return None
     t = dt.astimezone(KST).time() if dt.tzinfo else dt.time()
     if CHECKOUT_NORMALIZE_START <= t <= CHECKOUT_NORMALIZE_END:
         return datetime.combine(dt.date(), CHECKOUT_NORMALIZED, tzinfo=KST)
+    if CHECKOUT_HALF_START <= t <= CHECKOUT_HALF_END:
+        return datetime.combine(dt.date(), CHECKOUT_HALF_NORMALIZED, tzinfo=KST)
     return dt
 
 
