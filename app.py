@@ -2715,7 +2715,17 @@ def _make_payroll_result_response(
             return _err_template()
 
         daily["_date_str"] = pd.to_datetime(daily["date"]).astype(str).str[:10]
-        date_columns = sorted(daily["_date_str"].unique())
+        date_columns = set(daily["_date_str"].unique())
+        # payroll_result.csv는 산정기간 내 모든 평일을 컬럼으로 갖는다(기록 없는 미래 일자 포함).
+        # 헤더→날짜 매핑이 빠지면 그 컬럼은 공휴일·계약요일 판정에서 누락되므로 동일 범위로 맞춘다.
+        try:
+            from payroll_calculator import _infer_payroll_period, _period_weekday_strs
+
+            _ps, _pe = _infer_payroll_period(daily)
+            date_columns |= set(_period_weekday_strs(_ps, _pe))
+        except Exception:
+            logger.exception("payroll view: 산정기간 평일 컬럼 보강 생략")
+        date_columns = sorted(date_columns)
         date_headers = [f"{pd.to_datetime(d).month}/{pd.to_datetime(d).day}" for d in date_columns]
         pay_cols = [
             "base_pay",

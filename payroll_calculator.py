@@ -41,6 +41,17 @@ def _infer_payroll_period(daily: pd.DataFrame) -> tuple[date, date]:
     return start, end
 
 
+def _period_weekday_strs(payroll_start: date, payroll_end: date) -> list[str]:
+    """산정기간 내 모든 평일(월~금) YYYY-MM-DD. 기록이 없는 날(미래·공휴일)도 컬럼으로 나와야 자동채우기 대상이 됨."""
+    out = []
+    d = payroll_start
+    while d <= payroll_end:
+        if d.weekday() <= 4:
+            out.append(d.strftime("%Y-%m-%d"))
+        d += timedelta(days=1)
+    return out
+
+
 def _week_sunday(week_start) -> date:
     """주 시작(월) + 6일 = 일요일."""
     d = pd.to_datetime(week_start)
@@ -122,7 +133,9 @@ def build_payroll_column_order(
     daily["date"] = pd.to_datetime(daily["date"]).dt.normalize()
     payroll_start, payroll_end = _infer_payroll_period(daily)
     payroll_start_str = payroll_start.strftime("%Y-%m-%d")
-    all_dates = sorted(daily["date"].dt.strftime("%Y-%m-%d").unique())
+    all_dates = sorted(
+        set(daily["date"].dt.strftime("%Y-%m-%d").unique()) | set(_period_weekday_strs(payroll_start, payroll_end))
+    )
     if weekly is None or getattr(weekly, "empty", True) or "week_start" not in weekly.columns:
         week_starts: list = []
     else:
@@ -189,7 +202,10 @@ def main(output_dir=None):
         for i in range((payroll_end - payroll_start).days + 1)
     )
 
-    all_dates = sorted(daily["date"].dt.strftime("%Y-%m-%d").unique())
+    # 기록이 있는 날 + 산정기간 내 모든 평일 (미래 일자·공휴일도 빈 컬럼으로 노출 → 웹 자동채우기 가능)
+    all_dates = sorted(
+        set(daily["date"].dt.strftime("%Y-%m-%d").unique()) | set(_period_weekday_strs(payroll_start, payroll_end))
+    )
     employee_name_col = "employee_name" if "employee_name" in daily.columns else None
 
     # 주휴일=일요일. 주휴수당은 해당 주 일요일이 산정기간 내에 있을 때만 이번 급여에 포함

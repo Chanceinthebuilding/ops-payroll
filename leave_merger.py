@@ -531,11 +531,15 @@ def apply_leave_to_daily(daily_path: Path, leave_path: Path | None, output_dir: 
     date_max = _to_date(daily["date"].max())
     # 급여산정 시작일이 date_min보다 이를 수 있음 (예: 기간 첫날이 공휴일이라 실근무 기록 없는 경우)
     # → payroll_start를 date_min 하한선으로 사용해 기간 첫날 공휴일 누락 방지
+    # 마찬가지로 기간 마지막 날들이 공휴일이라 실근무 기록이 없으면(예: 9/24 추석) date_max가 그 앞에서 끝남
+    # → payroll_end를 date_max 상한선으로 사용해 기간 말 공휴일 누락 방지
     try:
         from payroll_calculator import _infer_payroll_period
-        payroll_start, _ = _infer_payroll_period(daily)
+        payroll_start, payroll_end = _infer_payroll_period(daily)
         if payroll_start < date_min:
             date_min = payroll_start
+        if payroll_end > date_max:
+            date_max = payroll_end
     except Exception:
         pass
     holiday_dates = get_weekday_public_holidays_kr(date_min, date_max)
